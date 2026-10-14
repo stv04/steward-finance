@@ -1,0 +1,124 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Perfil y credenciales del usuario en el sistema",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 255 },
+        "fullName": { "type": "string", "maxLength": 150 },
+        "role": { "type": "string", "enum": ["admin", "member"] },
+        "familyId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "email", "fullName", "role"]
+    },
+    "Family": {
+      "title": "Family",
+      "description": "Núcleo familiar compartido que agrupa miembros y bóveda común",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 100 },
+        "createdBy": { "type": "string", "maxLength": 128 },
+        "inviteCode": { "type": "string", "maxLength": 32 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "createdBy", "inviteCode"]
+    },
+    "Account": {
+      "title": "Account",
+      "description": "Cuenta bancaria, de inversión, tarjeta, PayPal o efectivo",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "familyId": { "type": "string", "maxLength": 128 },
+        "ownerId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "institution": { "type": "string", "maxLength": 100 },
+        "accountType": { 
+          "type": "string", 
+          "enum": ["bank_checking", "bank_savings", "investment", "card_debit", "card_credit", "digital_gateway", "cash_wallet"] 
+        },
+        "accountNumberMasked": { "type": "string", "maxLength": 20 },
+        "balance": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 3 },
+        "scope": { "type": "string", "enum": ["personal", "familiar"] },
+        "creditLimit": { "type": "number" },
+        "cutoffDay": { "type": "number" },
+        "paymentDueDay": { "type": "number" },
+        "yieldRateAnnual": { "type": "number" },
+        "assetClass": { "type": "string", "maxLength": 100 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "ownerId", "name", "accountType", "balance", "scope"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Movimiento contable del libro mayor financiero",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "familyId": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "date": { "type": "string", "maxLength": 10 },
+        "amount": { "type": "number" },
+        "type": { "type": "string", "enum": ["income", "expense", "transfer"] },
+        "accountId": { "type": "string", "maxLength": 128 },
+        "destinationAccountId": { "type": "string", "maxLength": 128 },
+        "categoryId": { "type": "string", "maxLength": 64 },
+        "subcategoryId": { "type": "string", "maxLength": 64 },
+        "scope": { "type": "string", "enum": ["personal", "familiar"] },
+        "description": { "type": "string", "maxLength": 255 },
+        "originalRawDescription": { "type": "string", "maxLength": 255 },
+        "attachmentUrl": { "type": "string" },
+        "attachmentName": { "type": "string", "maxLength": 150 },
+        "hash": { "type": "string", "maxLength": 64 },
+        "isReconciled": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "userId", "date", "amount", "type", "accountId", "categoryId", "scope", "description"]
+    },
+    "BudgetAccord": {
+      "title": "BudgetAccord",
+      "description": "Pacto presupuestario con regla de herencia continuada",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "familyId": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "effectiveMonth": { "type": "string", "maxLength": 7 },
+        "scope": { "type": "string", "enum": ["personal", "familiar"] },
+        "createdByUserId": { "type": "string", "maxLength": 128 },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name", "effectiveMonth", "scope", "createdByUserId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Colección de perfiles de usuarios autenticados"
+    },
+    "/families/{familyId}": {
+      "schema": "Family",
+      "description": "Núcleos familiares compartidos con lista de miembros"
+    },
+    "/families/{familyId}/accounts/{accountId}": {
+      "schema": "Account",
+      "description": "Cuentas financieras vinculadas al núcleo familiar o personales"
+    },
+    "/families/{familyId}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Libro mayor de transacciones compartidas y personales"
+    },
+    "/families/{familyId}/budgetAccords/{accordId}": {
+      "schema": "BudgetAccord",
+      "description": "Pactos presupuestarios de herencia continuada del núcleo familiar"
+    }
+  }
+}

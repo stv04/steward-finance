@@ -1,30 +1,37 @@
 import React from 'react';
-import { Plus, Landmark, UploadCloud, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { Plus, Landmark, UploadCloud, ShieldCheck, CheckCircle2, UserCircle2, Cloud } from 'lucide-react';
 import { UserProfile, ScopeType } from '../types/finance';
+import { ExtendedUserProfile } from '../context/AuthContext';
 
 interface NavbarProps {
-  activeTab: string;
-  setActiveTab: (tab: string) => void;
   activeScope: ScopeType;
   setActiveScope: (scope: ScopeType) => void;
   activeUserId: string;
   setActiveUserId: (id: string) => void;
   users: UserProfile[];
+  userProfile: ExtendedUserProfile | null;
   onNewTransaction: () => void;
   onOpenReconciliation: () => void;
+  onOpenAuth: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
-  activeTab,
-  setActiveTab,
   activeScope,
   setActiveScope,
   activeUserId,
   setActiveUserId,
   users,
+  userProfile,
   onNewTransaction,
   onOpenReconciliation,
+  onOpenAuth,
 }) => {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Normalize path without leading slash
+  const activeTab = location.pathname.replace(/^\//, '') || 'dashboard';
   const activeUser = users.find(u => u.id === activeUserId) || users[0];
 
   return (
@@ -33,7 +40,10 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-8">
         
         {/* Zone 1: Single text element wordmark */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div 
+          onClick={() => navigate('/dashboard')}
+          className="flex items-center gap-3 shrink-0 cursor-pointer"
+        >
           <div className="w-9 h-9 rounded-lg bg-slate-900 text-white flex items-center justify-center font-bold text-base shadow-sm">
             <Landmark className="w-5 h-5 text-emerald-400" />
           </div>
@@ -42,10 +52,10 @@ export const Navbar: React.FC<NavbarProps> = ({
           </span>
         </div>
 
-        {/* Zone 2: 4-5 concise single-line text navigation links */}
+        {/* Zone 2: 4-5 concise single-line text navigation links via react-router-dom */}
         <nav className="hidden lg:flex items-center gap-7 text-sm font-medium text-slate-600">
           <button
-            onClick={() => setActiveTab('dashboard')}
+            onClick={() => navigate('/dashboard')}
             className={`whitespace-nowrap transition-colors cursor-pointer ${
               activeTab === 'dashboard'
                 ? 'text-slate-950 font-semibold border-b-2 border-slate-900 pb-0.5'
@@ -55,7 +65,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             Dashboard
           </button>
           <button
-            onClick={() => setActiveTab('accounts')}
+            onClick={() => navigate('/accounts')}
             className={`whitespace-nowrap transition-colors cursor-pointer ${
               activeTab === 'accounts'
                 ? 'text-slate-950 font-semibold border-b-2 border-slate-900 pb-0.5'
@@ -65,7 +75,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             Cuentas
           </button>
           <button
-            onClick={() => setActiveTab('transactions')}
+            onClick={() => navigate('/transactions')}
             className={`whitespace-nowrap transition-colors cursor-pointer ${
               activeTab === 'transactions'
                 ? 'text-slate-950 font-semibold border-b-2 border-slate-900 pb-0.5'
@@ -75,7 +85,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             Transacciones
           </button>
           <button
-            onClick={() => setActiveTab('budgets')}
+            onClick={() => navigate('/budgets')}
             className={`whitespace-nowrap transition-colors cursor-pointer ${
               activeTab === 'budgets'
                 ? 'text-slate-950 font-semibold border-b-2 border-slate-900 pb-0.5'
@@ -85,7 +95,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             Presupuestos
           </button>
           <button
-            onClick={() => setActiveTab('categories')}
+            onClick={() => navigate('/categories')}
             className={`whitespace-nowrap transition-colors cursor-pointer ${
               activeTab === 'categories'
                 ? 'text-slate-950 font-semibold border-b-2 border-slate-900 pb-0.5'
@@ -96,8 +106,27 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
         </nav>
 
-        {/* Zone 3: 1 primary action */}
+        {/* Zone 3: 1 primary action + User Profile trigger */}
         <div className="flex items-center gap-3 shrink-0">
+          {/* User profile / Login button */}
+          <button
+            onClick={onOpenAuth}
+            className="flex items-center gap-2 px-2.5 py-1.5 text-xs text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+            title="Cuenta y Autenticación Firebase"
+          >
+            {userProfile?.avatar ? (
+              <img src={userProfile.avatar} alt={userProfile.name} className="w-5 h-5 rounded-full object-cover" />
+            ) : (
+              <UserCircle2 className="w-4 h-4 text-slate-600" />
+            )}
+            <span className="font-semibold text-slate-900 hidden sm:inline max-w-[110px] truncate">
+              {userProfile?.name?.split(' ')[0] || 'Cuenta'}
+            </span>
+            <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded hidden md:inline">
+              Firebase
+            </span>
+          </button>
+
           <button
             onClick={onNewTransaction}
             className="flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors shadow-sm whitespace-nowrap shrink-0 cursor-pointer"
@@ -159,7 +188,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </div>
 
-          {/* Secondary Action Toolbar & Architecture Links */}
+          {/* Secondary Action Toolbar & Technical Views via react-router-dom */}
           <div className="flex items-center gap-3">
             <button
               onClick={onOpenReconciliation}
@@ -172,7 +201,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <span className="text-slate-300">|</span>
 
             <button
-              onClick={() => setActiveTab('architecture')}
+              onClick={() => navigate('/architecture')}
               className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === 'architecture'
                   ? 'text-slate-900 font-semibold bg-slate-200/80'
@@ -184,7 +213,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             <button
-              onClick={() => setActiveTab('api-docs')}
+              onClick={() => navigate('/api-docs')}
               className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === 'api-docs'
                   ? 'text-slate-900 font-semibold bg-slate-200/80'
@@ -195,7 +224,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             <button
-              onClick={() => setActiveTab('unit-tests')}
+              onClick={() => navigate('/unit-tests')}
               className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === 'unit-tests'
                   ? 'text-emerald-700 font-semibold bg-emerald-50 border border-emerald-200'
