@@ -1,0 +1,6 @@
+{
+  "name": "Gestión Financiera Familiar & Personal",
+  "description": "Plataforma integral de finanzas personales y familiares con conciliación bancaria inteligente, presupuestos continuos heredados, análisis multicuenta y seguridad criptográfica.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
