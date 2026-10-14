@@ -37,6 +37,8 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   onNavigateToBudgets,
 }) => {
   const [timeframe, setTimeframe] = useState<TimeframeType>('monthly');
+  const [distributionMode, setDistributionMode] = useState<'categories' | 'subcategories'>('categories');
+  const [selectedParentFilter, setSelectedParentFilter] = useState<string>('all');
 
   // Filter accounts by active scope
   const filteredAccounts = useMemo(() => {
@@ -162,6 +164,53 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
     return items.sort((a, b) => b.amount - a.amount);
   }, [filteredTransactions, categories, totalExpense]);
+
+  // Subcategory distinct colors palette
+  const SUBCATEGORY_PALETTE = [
+    '#0284c7', '#16a34a', '#d97706', '#7c3aed', '#e11d48',
+    '#059669', '#2563eb', '#ca8a04', '#9333ea', '#db2777',
+    '#0d9488', '#4f46e5', '#ea580c', '#c026d3', '#0891b2',
+    '#65a30d', '#475569', '#b91c1c', '#047857', '#6d28d9'
+  ];
+
+  // Calculate spending by subcategory
+  const subcategorySpending = useMemo(() => {
+    const subMap = new Map<string, { subId: string; subName: string; parentId: string; parentName: string; parentColor: string; amount: number; historicalAvg: number }>();
+
+    for (const tx of filteredTransactions) {
+      if (tx.type === 'expense' && tx.subcategoryId) {
+        if (selectedParentFilter !== 'all' && tx.categoryId !== selectedParentFilter) {
+          continue;
+        }
+
+        const cat = categories.find(c => c.id === tx.categoryId);
+        const sub = cat?.subcategories.find(s => s.id === tx.subcategoryId);
+        const existing = subMap.get(tx.subcategoryId);
+        const prevAmount = existing ? existing.amount : 0;
+
+        subMap.set(tx.subcategoryId, {
+          subId: tx.subcategoryId,
+          subName: sub?.name || 'Subcategoría',
+          parentId: tx.categoryId,
+          parentName: cat?.name || 'General',
+          parentColor: cat?.color || '#64748b',
+          amount: prevAmount + tx.amount,
+          historicalAvg: sub?.monthlyAverageHistorical || 0,
+        });
+      }
+    }
+
+    const totalSubExpense = Array.from(subMap.values()).reduce((sum, item) => sum + item.amount, 0);
+
+    const items = Array.from(subMap.values()).map((item, idx) => ({
+      ...item,
+      color: SUBCATEGORY_PALETTE[idx % SUBCATEGORY_PALETTE.length],
+      percentage: totalSubExpense > 0 ? (item.amount / totalSubExpense) * 100 : 0,
+      totalReference: totalSubExpense,
+    }));
+
+    return items.sort((a, b) => b.amount - a.amount);
+  }, [filteredTransactions, categories, selectedParentFilter]);
 
   // Historical comparative months
   const monthlyComparisonData = [
@@ -374,23 +423,71 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </div>
         </div>
 
-        {/* Right 1 Col: Donut Distribution by Category */}
+        {/* Right 1 Col: Donut Distribution (Categories or Subcategories) */}
         <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-slate-900">Distribución de Gastos</h2>
               <PieIcon className="w-4 h-4 text-slate-400" />
             </div>
+
+            {/* Segmented Control: Categorías vs Subcategorías */}
+            <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 rounded-lg text-xs mb-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setDistributionMode('categories');
+                  setSelectedParentFilter('all');
+                }}
+                className={`py-1 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                  distributionMode === 'categories'
+                    ? 'bg-white text-slate-950 shadow-xs font-semibold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Categorías
+              </button>
+              <button
+                type="button"
+                onClick={() => setDistributionMode('subcategories')}
+                className={`py-1 text-xs font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                  distributionMode === 'subcategories'
+                    ? 'bg-white text-slate-950 shadow-xs font-semibold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Subcategorías
+              </button>
+            </div>
+
+            {/* Filter by Parent Category if in Subcategories mode */}
+            {distributionMode === 'subcategories' && (
+              <div className="mb-3">
+                <select
+                  value={selectedParentFilter}
+                  onChange={(e) => setSelectedParentFilter(e.target.value)}
+                  className="w-full text-[11px] bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-700 font-medium outline-hidden"
+                >
+                  <option value="all">Todas las subcategorías globales</option>
+                  {categories.filter(c => c.type === 'expense').map(c => (
+                    <option key={c.id} value={c.id}>
+                      Subcategorías de: {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {/* Donut representation with SVG */}
             <div className="flex items-center justify-center py-2">
               <svg viewBox="0 0 100 100" className="w-36 h-36 -rotate-90">
                 {(() => {
+                  const dataList = distributionMode === 'categories' ? categorySpending : subcategorySpending;
                   let accumulatedPercent = 0;
-                  return categorySpending.map((cat, i) => {
-                    const strokeDasharray = `${cat.percentage} ${100 - cat.percentage}`;
+                  return dataList.map((item, i) => {
+                    const strokeDasharray = `${item.percentage} ${100 - item.percentage}`;
                     const strokeDashoffset = -accumulatedPercent;
-                    accumulatedPercent += cat.percentage;
+                    accumulatedPercent += item.percentage;
                     return (
                       <circle
                         key={i}
@@ -398,7 +495,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
                         cy="50"
                         r="38"
                         fill="transparent"
-                        stroke={cat.color}
+                        stroke={item.color}
                         strokeWidth="16"
                         strokeDasharray={strokeDasharray}
                         strokeDashoffset={strokeDashoffset}
@@ -413,25 +510,64 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
               </svg>
             </div>
 
-            {/* Category breakdown table */}
-            <div className="space-y-2 mt-4">
-              {categorySpending.slice(0, 5).map(cat => (
-                <div key={cat.id} className="flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2 truncate">
-                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.color }}></span>
-                    <span className="text-slate-700 truncate font-medium">{cat.name}</span>
+            {/* Breakdown table */}
+            <div className="space-y-2 mt-4 max-h-48 overflow-y-auto pr-1">
+              {distributionMode === 'categories' ? (
+                categorySpending.slice(0, 5).map(cat => (
+                  <div 
+                    key={cat.id} 
+                    onClick={() => {
+                      setSelectedParentFilter(cat.id);
+                      setDistributionMode('subcategories');
+                    }}
+                    className="flex items-center justify-between text-xs hover:bg-slate-50 p-1 rounded transition-colors cursor-pointer group"
+                    title="Haz clic para ver subcategorías de esta categoría"
+                  >
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: cat.color }}></span>
+                      <span className="text-slate-700 truncate font-medium group-hover:text-slate-950">{cat.name}</span>
+                    </div>
+                    <div className="flex items-center gap-3 font-mono tabular-nums shrink-0">
+                      <span className="text-slate-900 font-semibold">${cat.amount.toFixed(2)}</span>
+                      <span className="text-slate-400 w-10 text-right">{cat.percentage.toFixed(0)}%</span>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3 font-mono tabular-nums shrink-0">
-                    <span className="text-slate-900 font-semibold">${cat.amount.toFixed(2)}</span>
-                    <span className="text-slate-400 w-10 text-right">{cat.percentage.toFixed(0)}%</span>
+                ))
+              ) : (
+                subcategorySpending.length === 0 ? (
+                  <div className="text-center py-4 text-xs text-slate-400">
+                    No hay gastos en subcategorías para este filtro.
                   </div>
-                </div>
-              ))}
+                ) : (
+                  subcategorySpending.map(sub => (
+                    <div key={sub.subId} className="flex items-center justify-between text-xs hover:bg-slate-50 p-1 rounded transition-colors">
+                      <div className="flex items-center gap-2 truncate">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: sub.color }}></span>
+                        <div className="truncate">
+                          <span className="text-slate-800 font-medium block truncate">{sub.subName}</span>
+                          <span className="text-[10px] text-slate-400 block truncate">{sub.parentName}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 font-mono tabular-nums shrink-0">
+                        <span className="text-slate-900 font-semibold">${sub.amount.toFixed(2)}</span>
+                        <span className="text-slate-400 w-10 text-right">{sub.percentage.toFixed(0)}%</span>
+                      </div>
+                    </div>
+                  ))
+                )
+              )}
             </div>
           </div>
 
           <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between text-xs">
-            <span className="text-slate-500">Total: <strong className="font-mono text-slate-900">${totalExpense.toFixed(2)}</strong></span>
+            <span className="text-slate-500">
+              Total {distributionMode === 'subcategories' && selectedParentFilter !== 'all' ? 'Filtrado' : 'Gastos'}:{' '}
+              <strong className="font-mono text-slate-900">
+                ${(distributionMode === 'subcategories' && selectedParentFilter !== 'all'
+                  ? subcategorySpending.reduce((s, i) => s + i.amount, 0)
+                  : totalExpense).toFixed(2)}
+              </strong>
+            </span>
             <button
               onClick={onNavigateToTransactions}
               className="text-slate-900 font-medium hover:underline inline-flex items-center gap-1 cursor-pointer"
@@ -442,6 +578,101 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </div>
         </div>
 
+      </div>
+
+      {/* Dedicated Section: Gráficas de Distribución de Subcategorías (Ranking & Comparativa) */}
+      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-slate-100">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+              <PieIcon className="w-4 h-4 text-emerald-600" />
+              <span>Gráficas de Distribución por Subcategorías</span>
+            </h2>
+            <p className="text-xs text-slate-500">
+              Desglose detallado del gasto en subcategorías y porcentaje de impacto sobre el presupuesto
+            </p>
+          </div>
+
+          {/* Category Filter Tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto py-1">
+            <button
+              onClick={() => setSelectedParentFilter('all')}
+              className={`px-2.5 py-1 text-xs font-medium rounded transition-colors whitespace-nowrap cursor-pointer ${
+                selectedParentFilter === 'all'
+                  ? 'bg-slate-900 text-white font-semibold'
+                  : 'bg-slate-100 text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Todas
+            </button>
+            {categories.filter(c => c.type === 'expense').map(c => (
+              <button
+                key={c.id}
+                onClick={() => setSelectedParentFilter(c.id)}
+                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors whitespace-nowrap cursor-pointer flex items-center gap-1.5 ${
+                  selectedParentFilter === c.id
+                    ? 'bg-slate-900 text-white font-semibold'
+                    : 'bg-slate-100 text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: c.color }} />
+                <span>{c.name}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Horizontal Bar Chart of Subcategories */}
+        <div className="space-y-3 pt-2">
+          {subcategorySpending.length === 0 ? (
+            <div className="py-8 text-center text-xs text-slate-400">
+              No se registran gastos en subcategorías para la selección actual.
+            </div>
+          ) : (
+            subcategorySpending.map((sub, idx) => {
+              const diffFromHistorical = sub.historicalAvg > 0 
+                ? ((sub.amount - sub.historicalAvg) / sub.historicalAvg) * 100 
+                : 0;
+
+              return (
+                <div key={sub.subId} className="space-y-1 group">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="font-mono text-slate-400 text-[11px] w-5">#{idx + 1}</span>
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sub.color }} />
+                      <span className="font-semibold text-slate-900 truncate">{sub.subName}</span>
+                      <span className="text-slate-400 hidden sm:inline">·</span>
+                      <span className="text-slate-500 text-[11px] hidden sm:inline">{sub.parentName}</span>
+                    </div>
+
+                    <div className="flex items-center gap-4 shrink-0 font-mono tabular-nums text-xs">
+                      <span className="font-bold text-slate-900">${sub.amount.toFixed(2)}</span>
+                      <span className="text-slate-500 font-medium w-12 text-right">{sub.percentage.toFixed(1)}%</span>
+                      {sub.historicalAvg > 0 && (
+                        <span className={`text-[11px] hidden md:inline w-24 text-right ${
+                          diffFromHistorical > 10 ? 'text-rose-600' : diffFromHistorical < -10 ? 'text-emerald-600' : 'text-slate-400'
+                        }`}>
+                          {diffFromHistorical > 0 ? '+' : ''}{diffFromHistorical.toFixed(0)}% vs hist.
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Horizontal Bar */}
+                  <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                    <div 
+                      className="h-full rounded-full transition-all group-hover:brightness-90"
+                      style={{ 
+                        width: `${Math.max(sub.percentage, 2)}%`, 
+                        backgroundColor: sub.color 
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
       {/* Account Snapshot Strip */}
