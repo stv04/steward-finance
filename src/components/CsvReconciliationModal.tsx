@@ -8,11 +8,13 @@ import {
   ArrowRight, 
   FileSpreadsheet, 
   HelpCircle,
-  Hash
+  Hash,
+  AlertCircle
 } from 'lucide-react';
 import { FinancialAccount, ParentCategory, Transaction, UserProfile } from '../types/finance';
 import { SAMPLE_RAW_CSV_STATEMENTS } from '../data/mockData';
-import { parseRawBankCsv, reconcileStatementBatch, ReconciliationResultItem, findSimilarTransactionsForBulkCategorization } from '../utils/reconciliation';
+import { parseRawBankCsv, reconcileStatementBatch, ReconciliationResultItem } from '../utils/reconciliation';
+import { formatEuro } from '../utils/formatters';
 
 interface CsvReconciliationModalProps {
   isOpen: boolean;
@@ -72,7 +74,7 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
       return targetWords.some(tw => otherWords.includes(tw));
     });
 
-    if (similarInBatch.length > 0) {
+    if (newCatId && similarInBatch.length > 0) {
       setBulkPromptModal({
         isOpen: true,
         targetDescription: item.row.description,
@@ -90,8 +92,8 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
           ...it,
           suggestedCategoryId: newCatId,
           suggestedSubcategoryId: defaultSubId,
-          confidenceScore: 1.0,
-          matchedRuleOrTx: 'Asignado manualmente por usuario',
+          confidenceScore: newCatId ? 1.0 : 0,
+          matchedRuleOrTx: newCatId ? 'Asignado manualmente por usuario' : 'Pendiente de categorizar',
         };
       }
       return it;
@@ -118,12 +120,10 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
   };
 
   const handleConfirmImport = () => {
-    // Only import non-duplicate items
     const toImport: Transaction[] = reconciledItems
       .filter(item => !item.isDuplicate)
       .map(item => {
-        const cat = categories.find(c => c.id === item.suggestedCategoryId) || categories[0];
-        const isIncome = item.suggestedCategoryId === 'cat_ingresos' || item.row.amount > 3000;
+        const isIncome = item.row.isIncome;
 
         return {
           id: `tx_imp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -132,11 +132,12 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
           amount: item.row.amount,
           type: isIncome ? 'income' : 'expense',
           accountId: targetAccountId,
-          categoryId: item.suggestedCategoryId || categories[1].id,
-          subcategoryId: item.suggestedSubcategoryId || categories[1].subcategories[0]?.id || '',
+          categoryId: item.suggestedCategoryId || '',
+          subcategoryId: item.suggestedSubcategoryId || '',
           scope: 'familiar',
           description: item.row.description,
           originalRawDescription: item.row.description,
+          movement: item.row.movement || (isIncome ? 'Abono / Ingreso' : 'Cargo / Gasto'),
           hash: item.hash,
           isReconciled: true,
           createdAt: new Date().toISOString(),
@@ -149,6 +150,7 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
 
   const duplicateCount = reconciledItems.filter(i => i.isDuplicate).length;
   const readyCount = reconciledItems.length - duplicateCount;
+  const uncategorizedCount = reconciledItems.filter(i => !i.isDuplicate && !i.suggestedCategoryId).length;
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -162,10 +164,10 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900">
-                Motor de Conciliación Bancaria &amp; Parser CSV
+                Carga &amp; Conciliación de Extractos Bancarios
               </h2>
               <p className="text-xs text-slate-500">
-                Mapeo dinámico, detección de duplicados por hash SHA y sugerencias automáticas de categorización
+                Compatible con extractos de tu banco (Fecha, Concepto, Movimiento, Importe) y copiado directo de Excel
               </p>
             </div>
           </div>
@@ -183,45 +185,59 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
           {/* Input step */}
           {!hasProcessed ? (
             <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <label className="text-xs font-semibold text-slate-700">
-                  Pegar Extracto Bancario en formato CSV / Texto delimitado
-                </label>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500">Cuenta de destino:</span>
+              
+              {/* Account Selection and Explanation */}
+              <div className="p-3.5 bg-blue-50/60 border border-blue-200/80 rounded-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-xs text-blue-900">1. Selecciona la cuenta bancaria destino</span>
+                  </div>
+                  <p className="text-[11px] text-blue-700 leading-relaxed">
+                    Al descargar el extracto de tu banco ya pertenece a una cuenta específica. Por ello, no requieres una columna 'Cuenta' en el archivo; todas las filas se conciliarán directamente en la cuenta que elijas aquí.
+                  </p>
+                </div>
+
+                <div className="shrink-0 flex items-center gap-2">
                   <select
                     value={targetAccountId}
                     onChange={(e) => setTargetAccountId(e.target.value)}
-                    className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs text-slate-700 font-medium"
+                    className="bg-white border border-blue-300 rounded-lg px-3 py-1.5 text-xs text-slate-900 font-semibold shadow-xs"
                   >
                     {accounts.map(acc => (
                       <option key={acc.id} value={acc.id}>
-                        {acc.name}
+                        {acc.name} ({acc.accountNumberMasked})
                       </option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              <textarea
-                rows={8}
-                value={csvText}
-                onChange={(e) => setCsvText(e.target.value)}
-                placeholder="Fecha,Descripcion_Original,Monto,Cuenta..."
-                className="w-full p-3 text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-hidden focus:border-slate-500"
-              />
+              <div>
+                <label className="text-xs font-semibold text-slate-700 mb-1.5 block">
+                  2. Pega el extracto bancario (CSV delimitado por comas, punto y coma o tabulaciones de Excel)
+                </label>
+                <textarea
+                  rows={9}
+                  value={csvText}
+                  onChange={(e) => setCsvText(e.target.value)}
+                  placeholder="Fecha,Concepto,Movimiento,Importe&#10;2026-10-14,SUPERMERCADO CENTRAL,Cargo,85.20..."
+                  className="w-full p-3 text-xs font-mono bg-slate-50 border border-slate-300 rounded-lg focus:bg-white focus:outline-hidden focus:border-slate-500"
+                />
+              </div>
 
-              <div className="flex items-center justify-between text-xs text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-200">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between text-xs text-slate-500 bg-slate-50 p-3 rounded-lg border border-slate-200 gap-2">
                 <div className="flex items-center gap-2">
-                  <FileSpreadsheet className="w-4 h-4 text-blue-600" />
-                  <span>Detección automática de encabezados: <strong>Fecha, Descripción, Monto, Cuenta</strong></span>
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    Formato estándar: <strong>Fecha</strong>, <strong>Concepto</strong>, <strong>Movimiento</strong> (Cargo / Abono o Débito / Crédito) e <strong>Importe</strong>
+                  </span>
                 </div>
                 <button
                   type="button"
                   onClick={() => setCsvText(SAMPLE_RAW_CSV_STATEMENTS)}
-                  className="text-blue-700 font-semibold hover:underline cursor-pointer"
+                  className="text-blue-700 font-semibold hover:underline cursor-pointer shrink-0"
                 >
-                  Restaurar Datos de Muestra
+                  Restaurar Ejemplo Real
                 </button>
               </div>
 
@@ -240,7 +256,7 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
             <div className="space-y-4">
               
               {/* Summary Stats */}
-              <div className="grid grid-cols-3 gap-3 text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                 <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
                   <span className="text-slate-500 block">Total en Extracto</span>
                   <span className="text-lg font-bold font-mono text-slate-900">{reconciledItems.length}</span>
@@ -249,11 +265,27 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
                   <span className="text-emerald-700 block">Listas para Importar</span>
                   <span className="text-lg font-bold font-mono text-emerald-800">{readyCount}</span>
                 </div>
+                <div className="bg-amber-50 p-3 rounded-lg border border-amber-200">
+                  <span className="text-amber-700 block">Sin Categorizar</span>
+                  <span className="text-lg font-bold font-mono text-amber-800">{uncategorizedCount}</span>
+                </div>
                 <div className="bg-rose-50 p-3 rounded-lg border border-rose-200">
-                  <span className="text-rose-700 block">Duplicados Omitidos (Hash)</span>
+                  <span className="text-rose-700 block">Duplicados Omitidos</span>
                   <span className="text-lg font-bold font-mono text-rose-800">{duplicateCount}</span>
                 </div>
               </div>
+
+              {uncategorizedCount > 0 && (
+                <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-lg text-xs text-amber-900 flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-semibold">Atención: {uncategorizedCount} movimientos no tienen categoría asignada.</span>
+                    <p className="text-[11px] text-amber-700 mt-0.5">
+                      Puedes asignarles su categoría en la tabla de abajo, o importarlos así: el sistema los registrará como <strong>"Sin Categorizar"</strong> y los visualizarás claramente en las gráficas para clasificarlos cuando desees.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Table of Reconciled Items */}
               <div className="border border-slate-200 rounded-lg overflow-hidden text-xs">
@@ -263,14 +295,15 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
                       <tr>
                         <th className="py-2.5 px-3">Estado</th>
                         <th className="py-2.5 px-3">Fecha &amp; Concepto</th>
-                        <th className="py-2.5 px-3 text-right">Monto</th>
-                        <th className="py-2.5 px-3">Categoría Asignada / Sugerida</th>
-                        <th className="py-2.5 px-3">Confianza &amp; Hash</th>
+                        <th className="py-2.5 px-3">Movimiento</th>
+                        <th className="py-2.5 px-3 text-right">Importe</th>
+                        <th className="py-2.5 px-3">Categoría Asignada</th>
+                        <th className="py-2.5 px-3">Confianza</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {reconciledItems.map(item => {
-                        const currentCat = categories.find(c => c.id === item.suggestedCategoryId);
+                        const hasCategory = Boolean(item.suggestedCategoryId);
 
                         return (
                           <tr key={item.id} className={item.isDuplicate ? 'bg-rose-50/40 text-slate-400' : 'hover:bg-slate-50'}>
@@ -279,12 +312,17 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
                               {item.isDuplicate ? (
                                 <div className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700">
                                   <AlertTriangle className="w-3.5 h-3.5" />
-                                  <span>Duplicado (Omitido)</span>
+                                  <span>Duplicado</span>
                                 </div>
-                              ) : (
+                              ) : hasCategory ? (
                                 <div className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
                                   <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>Válido</span>
+                                  <span>Categorizado</span>
+                                </div>
+                              ) : (
+                                <div className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700">
+                                  <AlertCircle className="w-3.5 h-3.5" />
+                                  <span>Pendiente</span>
                                 </div>
                               )}
                             </td>
@@ -295,9 +333,20 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
                               <span className="font-medium text-slate-900 block truncate max-w-xs">{item.row.description}</span>
                             </td>
 
+                            {/* Movimiento (Cargo / Abono) */}
+                            <td className="py-2.5 px-3 whitespace-nowrap">
+                              <span className={`text-[11px] font-semibold px-2 py-0.5 rounded ${
+                                item.row.isIncome ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-700'
+                              }`}>
+                                {item.row.isIncome ? 'Abono / Ingreso' : 'Cargo / Gasto'}
+                              </span>
+                            </td>
+
                             {/* Monto */}
                             <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900 whitespace-nowrap">
-                              ${item.row.amount.toFixed(2)}
+                              <span className={item.row.isIncome ? 'text-emerald-700' : 'text-slate-900'}>
+                                {formatEuro(item.row.isIncome ? item.row.amount : -item.row.amount, { showSign: true })}
+                              </span>
                             </td>
 
                             {/* Categoría Asignada / Dropdown interactivo */}
@@ -306,8 +355,13 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
                                 <select
                                   value={item.suggestedCategoryId || ''}
                                   onChange={(e) => handleCategoryChangeOnItem(item.id, e.target.value)}
-                                  className="bg-white border border-slate-300 rounded px-2 py-1 text-xs text-slate-800 font-medium cursor-pointer"
+                                  className={`border rounded px-2 py-1 text-xs font-medium cursor-pointer ${
+                                    hasCategory 
+                                      ? 'bg-white border-slate-300 text-slate-800' 
+                                      : 'bg-amber-50 border-amber-300 text-amber-900 font-semibold'
+                                  }`}
                                 >
+                                  <option value="">⚠️ Sin categorizar (Pendiente)</option>
                                   {categories.map(cat => (
                                     <option key={cat.id} value={cat.id}>
                                       {cat.name}
@@ -322,10 +376,10 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
                             {/* Confianza / Regla */}
                             <td className="py-2.5 px-3 text-[11px] text-slate-500">
                               <div className="flex items-center gap-1">
-                                <span className="font-mono font-bold text-slate-700">
+                                <span className={`font-mono font-bold ${item.confidenceScore > 0 ? 'text-slate-700' : 'text-amber-700'}`}>
                                   {Math.round(item.confidenceScore * 100)}%
                                 </span>
-                                <span className="text-slate-400 truncate max-w-[140px]" title={item.matchedRuleOrTx}>
+                                <span className="text-slate-400 truncate max-w-[130px]" title={item.matchedRuleOrTx}>
                                   · {item.matchedRuleOrTx || 'Emparejado'}
                                 </span>
                               </div>
@@ -344,7 +398,7 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
                   onClick={() => setHasProcessed(false)}
                   className="text-xs text-slate-600 hover:text-slate-900 font-medium underline cursor-pointer"
                 >
-                  Volver a editar CSV
+                  Volver a editar extracto
                 </button>
 
                 <div className="flex items-center gap-3">
@@ -373,7 +427,7 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
 
       </div>
 
-      {/* Modal Específico Solicitado: Sugerencia Automatizada de Categorización Similar */}
+      {/* Modal: Sugerencia Automatizada de Categorización Similar */}
       {bulkPromptModal && (
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 z-60">
           <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
@@ -397,7 +451,7 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
                 "{bulkPromptModal.targetDescription}"
               </div>
               <p className="text-slate-600 mt-2">
-                ¿Deseas aplicar la categoría <strong>"{categories.find(c => c.id === bulkPromptModal.newCategoryId)?.name}"</strong> a todas las transacciones pasadas/pendientes coincidentes?
+                ¿Deseas aplicar la categoría <strong>"{categories.find(c => c.id === bulkPromptModal.newCategoryId)?.name}"</strong> a todas las transacciones coincidentes de este lote?
               </p>
             </div>
 

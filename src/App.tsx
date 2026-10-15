@@ -30,9 +30,14 @@ import {
   subscribeToFamilyAccounts, 
   subscribeToFamilyTransactions, 
   subscribeToFamilyBudgetAccords, 
+  subscribeToFamilyCategories,
   createAccountInFirestore,
   deleteAccountFromFirestore,
+  saveCategoryToFirestore,
+  deleteCategoryFromFirestore,
+  saveCategoriesBatchToFirestore,
   saveTransactionToFirestore, 
+  updateTransactionInFirestore,
   bulkImportTransactionsToFirestore, 
   updateAccountInFirestore, 
   saveBudgetAccordToFirestore, 
@@ -81,6 +86,7 @@ function MainApp() {
 
   // Modals state
   const [isTxModalOpen, setIsTxModalOpen] = useState<boolean>(false);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [isAccountModalOpen, setIsAccountModalOpen] = useState<boolean>(false);
   const [accountModalDefaultType, setAccountModalDefaultType] = useState<AccountType>('bank_checking');
   const [isReconciliationModalOpen, setIsReconciliationModalOpen] = useState<boolean>(false);
@@ -135,9 +141,9 @@ function MainApp() {
     };
   }, [needsAccounts, familyId, isRealUser]);
 
-  // 2. TRANSACTIONS Subscription: needed ONLY on '/dashboard' and '/transactions'
-  // (NOT queried when user is on '/accounts', '/categories', '/budgets', etc.)
-  const needsTransactions = isRealUser && ['dashboard', 'transactions'].includes(currentPath);
+  // 2. TRANSACTIONS Subscription: needed ONLY on '/dashboard', '/transactions', '/categories'
+  // (NOT queried when user is on '/accounts', '/budgets', '/architecture', etc.)
+  const needsTransactions = isRealUser && ['dashboard', 'transactions', 'categories'].includes(currentPath);
 
   useEffect(() => {
     if (!needsTransactions || !familyId) {
@@ -185,6 +191,39 @@ function MainApp() {
     };
   }, [needsBudgets, familyId, isRealUser]);
 
+  // 4. CATEGORIES Subscription: needed on '/dashboard', '/categories', '/transactions', '/budgets'
+  // (NOT queried when user visits '/accounts', '/architecture', '/api-docs', '/unit-tests')
+  const needsCategories = isRealUser && ['dashboard', 'categories', 'transactions', 'budgets'].includes(currentPath);
+
+  useEffect(() => {
+    if (!needsCategories || !familyId) {
+      if (!isRealUser) {
+        setCategories(INITIAL_CATEGORIES);
+      }
+      return;
+    }
+
+    setActiveSubscriptions(prev => Array.from(new Set([...prev, 'categories'])));
+
+    const unsub = subscribeToFamilyCategories(familyId, async (cloudCategories) => {
+      if (cloudCategories.length > 0) {
+        setCategories(cloudCategories);
+      } else {
+        // Auto-seed baseline categories into Firestore if collection is empty
+        try {
+          await saveCategoriesBatchToFirestore(familyId, INITIAL_CATEGORIES);
+        } catch (err) {
+          console.error('Error auto-seeding categories:', err);
+        }
+      }
+    });
+
+    return () => {
+      unsub();
+      setActiveSubscriptions(prev => prev.filter(s => s !== 'categories'));
+    };
+  }, [needsCategories, familyId, isRealUser]);
+
   // Initialize Starter Baseline in Firestore for newly registered families (Inherits ONLY Budget & Categories)
   const handleSeedCloudVault = async () => {
     if (!userProfile?.familyId || !currentUser) return;
@@ -230,32 +269,102 @@ function MainApp() {
     setAccounts(prev => prev.filter(a => a.id !== accountId));
   };
 
-  // Save Transaction
-  const handleSaveTransaction = async (newTx: Transaction) => {
+  // Save or Update Transaction
+  const handleSaveTransaction = async (newOrUpdatedTx: Transaction, similarTxIds?: string[]) => {
+    if (editingTransaction) {
+      const prevTx = transactions.find(t => t.id === newOrUpdatedTx.id) || editingTransaction;
+
+      if (currentUser && !isDemoMode && userProfile?.familyId) {
+        try {
+          await updateTransactionInFirestore(
+            userProfile.familyId,
+            newOrUpdatedTx,
+            prevTx,
+            accounts,
+            similarTxIds
+          );
+        } catch (err) {
+          console.error('Firestore update transaction failed:', err);
+        }
+      }
+
+      // Update transactions state locally
+      setTransactions(prev => prev.map(t => {
+        if (t.id === newOrUpdatedTx.id) {
+          return newOrUpdatedTx;
+        }
+        if (similarTxIds && similarTxIds.includes(t.id)) {
+          return {
+            ...t,
+            categoryId: newOrUpdatedTx.categoryId,
+            subcategoryId: newOrUpdatedTx.subcategoryId,
+          };
+        }
+        return t;
+      }));
+
+      // Adjust accounts balance locally if amount, account or type changed
+      setAccounts(prevAccounts => {
+        // Revert old impact
+        let updated = prevAccounts.map(acc => {
+          if (prevTx.type === 'expense' && acc.id === prevTx.accountId) {
+            return { ...acc, balance: acc.balance + prevTx.amount };
+          }
+          if (prevTx.type === 'income' && acc.id === prevTx.accountId) {
+            return { ...acc, balance: acc.balance - prevTx.amount };
+          }
+          if (prevTx.type === 'transfer') {
+            if (acc.id === prevTx.accountId) return { ...acc, balance: acc.balance + prevTx.amount };
+            if (acc.id === prevTx.destinationAccountId) return { ...acc, balance: acc.balance - prevTx.amount };
+          }
+          return acc;
+        });
+        // Apply new impact
+        updated = updated.map(acc => {
+          if (newOrUpdatedTx.type === 'expense' && acc.id === newOrUpdatedTx.accountId) {
+            return { ...acc, balance: acc.balance - newOrUpdatedTx.amount };
+          }
+          if (newOrUpdatedTx.type === 'income' && acc.id === newOrUpdatedTx.accountId) {
+            return { ...acc, balance: acc.balance + newOrUpdatedTx.amount };
+          }
+          if (newOrUpdatedTx.type === 'transfer') {
+            if (acc.id === newOrUpdatedTx.accountId) return { ...acc, balance: acc.balance - newOrUpdatedTx.amount };
+            if (acc.id === newOrUpdatedTx.destinationAccountId) return { ...acc, balance: acc.balance + newOrUpdatedTx.amount };
+          }
+          return acc;
+        });
+        return updated;
+      });
+
+      setEditingTransaction(null);
+      return;
+    }
+
+    // New transaction
     if (currentUser && !isDemoMode && userProfile?.familyId) {
       try {
-        await saveTransactionToFirestore(userProfile.familyId, newTx, accounts);
+        await saveTransactionToFirestore(userProfile.familyId, newOrUpdatedTx, accounts);
       } catch (err) {
         console.error('Firestore save transaction failed:', err);
       }
       return;
     }
 
-    setTransactions(prev => [newTx, ...prev]);
+    setTransactions(prev => [newOrUpdatedTx, ...prev]);
     setAccounts(prevAccounts => {
       return prevAccounts.map(acc => {
-        if (newTx.type === 'expense' && acc.id === newTx.accountId) {
-          return { ...acc, balance: acc.balance - newTx.amount };
+        if (newOrUpdatedTx.type === 'expense' && acc.id === newOrUpdatedTx.accountId) {
+          return { ...acc, balance: acc.balance - newOrUpdatedTx.amount };
         }
-        if (newTx.type === 'income' && acc.id === newTx.accountId) {
-          return { ...acc, balance: acc.balance + newTx.amount };
+        if (newOrUpdatedTx.type === 'income' && acc.id === newOrUpdatedTx.accountId) {
+          return { ...acc, balance: acc.balance + newOrUpdatedTx.amount };
         }
-        if (newTx.type === 'transfer') {
-          if (acc.id === newTx.accountId) {
-            return { ...acc, balance: acc.balance - newTx.amount };
+        if (newOrUpdatedTx.type === 'transfer') {
+          if (acc.id === newOrUpdatedTx.accountId) {
+            return { ...acc, balance: acc.balance - newOrUpdatedTx.amount };
           }
-          if (acc.id === newTx.destinationAccountId) {
-            return { ...acc, balance: acc.balance + newTx.amount };
+          if (acc.id === newOrUpdatedTx.destinationAccountId) {
+            return { ...acc, balance: acc.balance + newOrUpdatedTx.amount };
           }
         }
         return acc;
@@ -310,25 +419,106 @@ function MainApp() {
   const handleOpenTransferModal = (originAccountId?: string) => {
     setTxModalInitialType('transfer');
     setTxModalInitialOriginAcc(originAccountId);
+    setEditingTransaction(null);
     setIsTxModalOpen(true);
   };
 
-  const handleAddSubcategory = (parentId: string, newSubcategoryName: string, historicalAverage: number) => {
-    setCategories(prev => prev.map(cat => {
-      if (cat.id === parentId) {
-        const newSub = {
-          id: `sub_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
-          parentId,
-          name: newSubcategoryName,
-          monthlyAverageHistorical: historicalAverage,
-        };
-        return {
-          ...cat,
-          subcategories: [...cat.subcategories, newSub],
-        };
+  // Categories and Subcategories Handlers (Firestore-backed)
+  const handleSaveCategory = async (newCategory: ParentCategory) => {
+    if (currentUser && !isDemoMode && userProfile?.familyId) {
+      try {
+        await saveCategoryToFirestore(userProfile.familyId, newCategory);
+      } catch (err) {
+        console.error('Firestore save category failed:', err);
       }
-      return cat;
-    }));
+      return;
+    }
+
+    setCategories(prev => [...prev, newCategory]);
+  };
+
+  const handleDeleteCategory = async (categoryId: string) => {
+    if (currentUser && !isDemoMode && userProfile?.familyId) {
+      try {
+        await deleteCategoryFromFirestore(userProfile.familyId, categoryId);
+      } catch (err) {
+        console.error('Firestore delete category failed:', err);
+      }
+      return;
+    }
+
+    setCategories(prev => prev.filter(c => c.id !== categoryId));
+  };
+
+  const handleAddSubcategory = async (parentId: string, newSubcategoryName: string, historicalAverage: number) => {
+    const parentCat = categories.find(c => c.id === parentId);
+    if (!parentCat) return;
+
+    const newSub = {
+      id: `sub_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      parentId,
+      name: newSubcategoryName,
+      monthlyAverageHistorical: historicalAverage,
+    };
+
+    const updatedCategory: ParentCategory = {
+      ...parentCat,
+      subcategories: [...parentCat.subcategories, newSub],
+    };
+
+    if (currentUser && !isDemoMode && userProfile?.familyId) {
+      try {
+        await saveCategoryToFirestore(userProfile.familyId, updatedCategory);
+      } catch (err) {
+        console.error('Firestore save subcategory failed:', err);
+      }
+      return;
+    }
+
+    setCategories(prev => prev.map(cat => cat.id === parentId ? updatedCategory : cat));
+  };
+
+  const handleDeleteSubcategory = async (parentId: string, subcategoryId: string) => {
+    const parentCat = categories.find(c => c.id === parentId);
+    if (!parentCat) return;
+
+    const updatedCategory: ParentCategory = {
+      ...parentCat,
+      subcategories: parentCat.subcategories.filter(s => s.id !== subcategoryId),
+    };
+
+    if (currentUser && !isDemoMode && userProfile?.familyId) {
+      try {
+        await saveCategoryToFirestore(userProfile.familyId, updatedCategory);
+      } catch (err) {
+        console.error('Firestore delete subcategory failed:', err);
+      }
+      return;
+    }
+
+    setCategories(prev => prev.map(cat => cat.id === parentId ? updatedCategory : cat));
+  };
+
+  const handleAssignCategoryToTransaction = async (txId: string, categoryId: string, subcategoryId: string) => {
+    const tx = transactions.find(t => t.id === txId);
+    if (!tx) return;
+
+    const updatedTx: Transaction = {
+      ...tx,
+      categoryId,
+      subcategoryId,
+    };
+
+    if (currentUser && !isDemoMode && userProfile?.familyId) {
+      try {
+        await updateTransactionInFirestore(userProfile.familyId, updatedTx, tx, accounts);
+      } catch (err) {
+        console.error('Firestore assign category failed:', err);
+      }
+      return;
+    }
+
+    setTransactions(prev => prev.map(t => t.id === txId ? updatedTx : t));
   };
 
   const handleSaveNewAccord = async (newAccord: BudgetAccord) => {
@@ -488,8 +678,13 @@ function MainApp() {
                 activeScope={activeScope}
                 activeUserId={activeUserId}
                 onNewTransaction={() => {
+                  setEditingTransaction(null);
                   setTxModalInitialType('expense');
                   setTxModalInitialOriginAcc(undefined);
+                  setIsTxModalOpen(true);
+                }}
+                onEditTransaction={(tx) => {
+                  setEditingTransaction(tx);
                   setIsTxModalOpen(true);
                 }}
                 onOpenReconciliation={() => setIsReconciliationModalOpen(true)}
@@ -518,6 +713,10 @@ function MainApp() {
                 categories={categories}
                 transactions={transactions}
                 onAddSubcategory={handleAddSubcategory}
+                onSaveCategory={handleSaveCategory}
+                onDeleteCategory={handleDeleteCategory}
+                onDeleteSubcategory={handleDeleteSubcategory}
+                onAssignCategoryToTransaction={handleAssignCategoryToTransaction}
               />
             } 
           />
@@ -566,14 +765,19 @@ function MainApp() {
         defaultType={accountModalDefaultType}
       />
 
-      {/* Transaction Modal */}
+      {/* Transaction Modal (Supports both New and Edit with Bulk Similars Propagation) */}
       <TransactionModal
         isOpen={isTxModalOpen}
-        onClose={() => setIsTxModalOpen(false)}
+        onClose={() => {
+          setIsTxModalOpen(false);
+          setEditingTransaction(null);
+        }}
         onSave={handleSaveTransaction}
         accounts={accounts}
         categories={categories}
         users={users}
+        existingTransactions={transactions}
+        editingTransaction={editingTransaction}
         initialType={txModalInitialType}
         initialOriginAccountId={txModalInitialOriginAcc}
         activeUserId={activeUserId}

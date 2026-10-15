@@ -6,11 +6,14 @@ import {
   onSnapshot, 
   writeBatch,
   query,
-  orderBy
+  orderBy,
+  where,
+  QueryConstraint
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { FinancialAccount, Transaction, BudgetAccord, ParentCategory } from '../types/finance';
-import { INITIAL_BUDGET_ACCORDS } from '../data/mockData';
+import { INITIAL_BUDGET_ACCORDS, INITIAL_CATEGORIES } from '../data/mockData';
+import { normalizeAndValidateDate } from '../utils/dateUtils';
 
 /**
  * Sanitizes an object by removing undefined fields to satisfy Firestore payload constraints
@@ -108,6 +111,95 @@ export function subscribeToFamilyBudgetAccords(
 }
 
 /**
+ * Real-time listener for Categories and Subcategories
+ */
+export function subscribeToFamilyCategories(
+  familyId: string,
+  onUpdate: (categories: ParentCategory[]) => void
+): () => void {
+  const categoriesPath = `families/${familyId}/categories`;
+  const colRef = collection(db, 'families', familyId, 'categories');
+
+  return onSnapshot(
+    colRef,
+    (snapshot) => {
+      const items: ParentCategory[] = snapshot.docs.map(d => ({
+        ...d.data() as ParentCategory,
+        id: d.id,
+      }));
+      onUpdate(items);
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, categoriesPath);
+    }
+  );
+}
+
+/**
+ * Saves or updates a Category (with its subcategories) in Firestore
+ */
+export async function saveCategoryToFirestore(
+  familyId: string,
+  category: ParentCategory
+): Promise<void> {
+  const catPath = `families/${familyId}/categories/${category.id}`;
+  const catRef = doc(db, 'families', familyId, 'categories', category.id);
+
+  try {
+    const payload = cleanFirestorePayload({
+      ...category,
+      familyId,
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(catRef, payload, { merge: true });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, catPath);
+  }
+}
+
+/**
+ * Deletes a category from Firestore
+ */
+export async function deleteCategoryFromFirestore(
+  familyId: string,
+  categoryId: string
+): Promise<void> {
+  const catPath = `families/${familyId}/categories/${categoryId}`;
+  const catRef = doc(db, 'families', familyId, 'categories', categoryId);
+
+  try {
+    await deleteDoc(catRef);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, catPath);
+  }
+}
+
+/**
+ * Batch saves categories to Firestore (for seeding or importing)
+ */
+export async function saveCategoriesBatchToFirestore(
+  familyId: string,
+  categories: ParentCategory[]
+): Promise<void> {
+  const batch = writeBatch(db);
+  for (const cat of categories) {
+    const catRef = doc(db, 'families', familyId, 'categories', cat.id);
+    const payload = cleanFirestorePayload({
+      ...cat,
+      familyId,
+      updatedAt: new Date().toISOString(),
+    });
+    batch.set(catRef, payload, { merge: true });
+  }
+
+  try {
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `families/${familyId}/categories`);
+  }
+}
+
+/**
  * Creates or saves a new Financial Account in Firestore
  */
 export async function createAccountInFirestore(
@@ -187,6 +279,103 @@ export async function saveTransactionToFirestore(
     if (destAcc) {
       const destRef = doc(db, 'families', familyId, 'accounts', destAcc.id);
       batch.set(destRef, { balance: destAcc.balance + tx.amount }, { merge: true });
+    }
+  }
+
+  try {
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, txPath);
+  }
+}
+
+/**
+ * Updates a transaction in Firestore with atomic balance recalculation
+ * and optional bulk category/subcategory propagation to similar transactions
+ */
+export async function updateTransactionInFirestore(
+  familyId: string,
+  updatedTx: Transaction,
+  previousTx: Transaction,
+  currentAccounts: FinancialAccount[],
+  similarTxIdsToUpdateCategory?: string[]
+): Promise<void> {
+  const txPath = `families/${familyId}/transactions/${updatedTx.id}`;
+  const batch = writeBatch(db);
+
+  // 1. Set updated transaction document
+  const txRef = doc(db, 'families', familyId, 'transactions', updatedTx.id);
+  const payload = cleanFirestorePayload({
+    ...updatedTx,
+    familyId,
+    updatedAt: new Date().toISOString(),
+  });
+  batch.set(txRef, payload, { merge: true });
+
+  // 2. Calculate account balance corrections
+  // Revert previous transaction impact
+  const accountDeltas = new Map<string, number>();
+
+  const getRevertDelta = (tx: Transaction, isDestination = false): number => {
+    if (isDestination && tx.type === 'transfer') {
+      return -tx.amount; // Revert transfer arrival
+    }
+    if (tx.type === 'expense') return tx.amount; // Revert spending
+    if (tx.type === 'income') return -tx.amount; // Revert income
+    if (tx.type === 'transfer') return tx.amount; // Revert transfer departure
+    return 0;
+  };
+
+  const getApplyDelta = (tx: Transaction, isDestination = false): number => {
+    if (isDestination && tx.type === 'transfer') {
+      return tx.amount; // Apply transfer arrival
+    }
+    if (tx.type === 'expense') return -tx.amount; // Apply spending
+    if (tx.type === 'income') return tx.amount; // Apply income
+    if (tx.type === 'transfer') return -tx.amount; // Apply transfer departure
+    return 0;
+  };
+
+  // Revert previous origin account
+  const prevOrigAcc = previousTx.accountId;
+  accountDeltas.set(prevOrigAcc, (accountDeltas.get(prevOrigAcc) || 0) + getRevertDelta(previousTx));
+
+  // Revert previous destination account if transfer
+  if (previousTx.type === 'transfer' && previousTx.destinationAccountId) {
+    const prevDest = previousTx.destinationAccountId;
+    accountDeltas.set(prevDest, (accountDeltas.get(prevDest) || 0) + getRevertDelta(previousTx, true));
+  }
+
+  // Apply new origin account
+  const newOrigAcc = updatedTx.accountId;
+  accountDeltas.set(newOrigAcc, (accountDeltas.get(newOrigAcc) || 0) + getApplyDelta(updatedTx));
+
+  // Apply new destination account if transfer
+  if (updatedTx.type === 'transfer' && updatedTx.destinationAccountId) {
+    const newDest = updatedTx.destinationAccountId;
+    accountDeltas.set(newDest, (accountDeltas.get(newDest) || 0) + getApplyDelta(updatedTx, true));
+  }
+
+  // Apply deltas to accounts
+  for (const [accId, delta] of accountDeltas.entries()) {
+    if (delta !== 0) {
+      const acc = currentAccounts.find(a => a.id === accId);
+      if (acc) {
+        const accRef = doc(db, 'families', familyId, 'accounts', accId);
+        batch.set(accRef, { balance: acc.balance + delta }, { merge: true });
+      }
+    }
+  }
+
+  // 3. Propagate Category/Subcategory to similar transactions if requested by user
+  if (similarTxIdsToUpdateCategory && similarTxIdsToUpdateCategory.length > 0) {
+    for (const simId of similarTxIdsToUpdateCategory) {
+      const simRef = doc(db, 'families', familyId, 'transactions', simId);
+      batch.update(simRef, {
+        categoryId: updatedTx.categoryId,
+        subcategoryId: updatedTx.subcategoryId,
+        updatedAt: new Date().toISOString(),
+      });
     }
   }
 
@@ -319,7 +508,7 @@ export async function initializeFamilyWithStarterData(
     createdAt: new Date().toISOString(),
   }, { merge: true });
 
-  // 2. Inherit only the starter Budget Accord with continuous zero-based budgeting rules
+  // 2. Inherit starter Budget Accord with continuous zero-based budgeting rules
   for (const accord of INITIAL_BUDGET_ACCORDS) {
     const accordRef = doc(db, 'families', familyId, 'budgetAccords', accord.id);
     const cleanAccord = cleanFirestorePayload({
@@ -329,6 +518,17 @@ export async function initializeFamilyWithStarterData(
       createdAt: accord.createdAt || new Date().toISOString(),
     });
     batch.set(accordRef, cleanAccord, { merge: true });
+  }
+
+  // 3. Inherit starter Categories and Subcategories into Firestore
+  for (const cat of INITIAL_CATEGORIES) {
+    const catRef = doc(db, 'families', familyId, 'categories', cat.id);
+    const cleanCat = cleanFirestorePayload({
+      ...cat,
+      familyId,
+      createdAt: new Date().toISOString(),
+    });
+    batch.set(catRef, cleanCat, { merge: true });
   }
 
   // Note: Accounts and transactions are NOT populated. The user creates accounts manually.

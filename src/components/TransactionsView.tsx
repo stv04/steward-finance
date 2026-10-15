@@ -1,7 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { 
   Search, 
-  Filter, 
   ArrowUpRight, 
   ArrowDownRight, 
   ArrowLeftRight, 
@@ -10,10 +9,15 @@ import {
   Plus, 
   Calendar,
   X,
-  Eye,
-  Trash2
+  Trash2,
+  Pencil,
+  ChevronLeft,
+  ChevronRight,
+  RotateCcw
 } from 'lucide-react';
 import { FinancialAccount, ParentCategory, ScopeType, Transaction, UserProfile } from '../types/finance';
+import { formatEuro } from '../utils/formatters';
+import { TimeframePeriod, getTimeframeRange, isDateInSelectedPeriod } from '../utils/dateUtils';
 
 interface TransactionsViewProps {
   transactions: Transaction[];
@@ -23,6 +27,7 @@ interface TransactionsViewProps {
   activeScope: ScopeType;
   activeUserId: string;
   onNewTransaction: () => void;
+  onEditTransaction: (tx: Transaction) => void;
   onOpenReconciliation: () => void;
   onDeleteTransaction: (id: string) => void;
 }
@@ -35,6 +40,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   activeScope,
   activeUserId,
   onNewTransaction,
+  onEditTransaction,
   onOpenReconciliation,
   onDeleteTransaction,
 }) => {
@@ -44,6 +50,65 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   const [selectedType, setSelectedType] = useState<string>('all');
   const [selectedReceiptTx, setSelectedReceiptTx] = useState<Transaction | null>(null);
 
+  // Timeframe iteration state
+  const [timeframeFilter, setTimeframeFilter] = useState<'all' | 'monthly' | 'quarterly' | 'annual'>('all');
+  const [currentPeriod, setCurrentPeriod] = useState<TimeframePeriod>({
+    year: 2026,
+    month: 9, // October
+    quarter: 4,
+  });
+
+  const handlePrevPeriod = () => {
+    if (timeframeFilter === 'monthly') {
+      setCurrentPeriod(prev => {
+        if (prev.month === 0) {
+          return { year: prev.year - 1, month: 11, quarter: 4 };
+        }
+        const newMonth = prev.month - 1;
+        const newQuarter = (Math.floor(newMonth / 3) + 1) as 1 | 2 | 3 | 4;
+        return { ...prev, month: newMonth, quarter: newQuarter };
+      });
+    } else if (timeframeFilter === 'quarterly') {
+      setCurrentPeriod(prev => {
+        if (prev.quarter === 1) {
+          return { year: prev.year - 1, quarter: 4, month: 9 };
+        }
+        const newQuarter = (prev.quarter - 1) as 1 | 2 | 3 | 4;
+        return { ...prev, quarter: newQuarter, month: (newQuarter - 1) * 3 };
+      });
+    } else if (timeframeFilter === 'annual') {
+      setCurrentPeriod(prev => ({ ...prev, year: prev.year - 1 }));
+    }
+  };
+
+  const handleNextPeriod = () => {
+    if (timeframeFilter === 'monthly') {
+      setCurrentPeriod(prev => {
+        if (prev.month === 11) {
+          return { year: prev.year + 1, month: 0, quarter: 1 };
+        }
+        const newMonth = prev.month + 1;
+        const newQuarter = (Math.floor(newMonth / 3) + 1) as 1 | 2 | 3 | 4;
+        return { ...prev, month: newMonth, quarter: newQuarter };
+      });
+    } else if (timeframeFilter === 'quarterly') {
+      setCurrentPeriod(prev => {
+        if (prev.quarter === 4) {
+          return { year: prev.year + 1, quarter: 1, month: 0 };
+        }
+        const newQuarter = (prev.quarter + 1) as 1 | 2 | 3 | 4;
+        return { ...prev, quarter: newQuarter, month: (newQuarter - 1) * 3 };
+      });
+    } else if (timeframeFilter === 'annual') {
+      setCurrentPeriod(prev => ({ ...prev, year: prev.year + 1 }));
+    }
+  };
+
+  const activePeriodRange = useMemo(() => {
+    if (timeframeFilter === 'all') return null;
+    return getTimeframeRange(timeframeFilter, currentPeriod);
+  }, [timeframeFilter, currentPeriod]);
+
   // Filtered transactions
   const filtered = useMemo(() => {
     return transactions.filter(tx => {
@@ -52,13 +117,22 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         return false;
       }
 
+      // Timeframe period filter
+      if (timeframeFilter !== 'all') {
+        if (!isDateInSelectedPeriod(tx.date, timeframeFilter, currentPeriod)) {
+          return false;
+        }
+      }
+
       // Type filter
       if (selectedType !== 'all' && tx.type !== selectedType) {
         return false;
       }
 
       // Category filter
-      if (selectedCategory !== 'all' && tx.categoryId !== selectedCategory) {
+      if (selectedCategory === 'uncategorized') {
+        if (tx.categoryId && tx.categoryId !== 'cat_uncategorized') return false;
+      } else if (selectedCategory !== 'all' && tx.categoryId !== selectedCategory) {
         return false;
       }
 
@@ -72,12 +146,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         const query = searchQuery.toLowerCase();
         const matchDesc = tx.description.toLowerCase().includes(query);
         const matchRaw = tx.originalRawDescription?.toLowerCase().includes(query);
-        if (!matchDesc && !matchRaw) return false;
+        const matchMov = tx.movement?.toLowerCase().includes(query);
+        if (!matchDesc && !matchRaw && !matchMov) return false;
       }
 
       return true;
     }).sort((a, b) => b.date.localeCompare(a.date));
-  }, [transactions, activeScope, activeUserId, selectedType, selectedCategory, selectedAccount, searchQuery]);
+  }, [transactions, activeScope, activeUserId, timeframeFilter, currentPeriod, selectedType, selectedCategory, selectedAccount, searchQuery]);
 
   const getAccountName = (accId: string) => {
     const acc = accounts.find(a => a.id === accId);
@@ -109,22 +184,22 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             Libro Mayor de Transacciones (Ledger)
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Registro unificado de ingresos, egresos y transferencias multicuenta con trazabilidad por usuario
+            Registro unificado de ingresos, egresos y transferencias con trazabilidad de movimientos bancarios
           </p>
         </div>
 
         <div className="flex items-center gap-2">
           <button
             onClick={onOpenReconciliation}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer shadow-2xs"
           >
             <UploadCloud className="w-4 h-4 text-blue-600" />
-            <span>Importar Extracto CSV</span>
+            <span>Importar Extracto Bancario</span>
           </button>
 
           <button
             onClick={onNewTransaction}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer shadow-2xs"
           >
             <Plus className="w-4 h-4" />
             <span>Registrar Movimiento</span>
@@ -132,90 +207,152 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         </div>
       </div>
 
-      {/* Filter Toolbar */}
-      <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center gap-3">
-        {/* Search */}
-        <div className="relative flex-1 min-w-[220px]">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Buscar por concepto o comercio..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-hidden focus:border-slate-400 transition-colors"
-          />
+      {/* Filter Toolbar & Timeframe Iterators */}
+      <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs space-y-3">
+        
+        {/* Top row filters */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Buscar por concepto, comercio o detalle de movimiento..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:bg-white focus:outline-hidden focus:border-slate-400 transition-colors"
+            />
+          </div>
+
+          {/* Timeframe Scope Selector */}
+          <select
+            value={timeframeFilter}
+            onChange={(e) => setTimeframeFilter(e.target.value as any)}
+            className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium outline-hidden"
+          >
+            <option value="all">Todo el Histórico</option>
+            <option value="monthly">Filtrar por Mes</option>
+            <option value="quarterly">Filtrar por Trimestre</option>
+            <option value="annual">Filtrar por Año</option>
+          </select>
+
+          {/* Type Filter */}
+          <select
+            value={selectedType}
+            onChange={(e) => setSelectedType(e.target.value)}
+            className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium outline-hidden"
+          >
+            <option value="all">Todos los tipos</option>
+            <option value="expense">Solo Gastos</option>
+            <option value="income">Solo Ingresos</option>
+            <option value="transfer">Solo Transferencias</option>
+          </select>
+
+          {/* Category Filter */}
+          <select
+            value={selectedCategory}
+            onChange={(e) => setSelectedCategory(e.target.value)}
+            className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium outline-hidden"
+          >
+            <option value="all">Todas las categorías</option>
+            <option value="uncategorized">⚠️ Sin categorizar (Pendientes)</option>
+            {categories.map(cat => (
+              <option key={cat.id} value={cat.id}>
+                {cat.name}
+              </option>
+            ))}
+          </select>
+
+          {/* Account Filter */}
+          <select
+            value={selectedAccount}
+            onChange={(e) => setSelectedAccount(e.target.value)}
+            className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium outline-hidden"
+          >
+            <option value="all">Todas las cuentas</option>
+            {accounts.map(acc => (
+              <option key={acc.id} value={acc.id}>
+                {acc.name}
+              </option>
+            ))}
+          </select>
+
+          {/* Reset Filters */}
+          {(searchQuery || selectedType !== 'all' || selectedCategory !== 'all' || selectedAccount !== 'all' || timeframeFilter !== 'all') && (
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedType('all');
+                setSelectedCategory('all');
+                setSelectedAccount('all');
+                setTimeframeFilter('all');
+              }}
+              className="text-xs text-slate-500 hover:text-slate-900 underline font-medium cursor-pointer"
+            >
+              Limpiar filtros
+            </button>
+          )}
         </div>
 
-        {/* Type Filter */}
-        <select
-          value={selectedType}
-          onChange={(e) => setSelectedType(e.target.value)}
-          className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium outline-hidden"
-        >
-          <option value="all">Todos los tipos</option>
-          <option value="expense">Solo Gastos</option>
-          <option value="income">Solo Ingresos</option>
-          <option value="transfer">Solo Transferencias</option>
-        </select>
+        {/* Timeframe Iteration Bar (When Month, Quarter, or Annual is selected) */}
+        {timeframeFilter !== 'all' && activePeriodRange && (
+          <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 font-medium">Período de búsqueda:</span>
+              <div className="inline-flex items-center gap-1 bg-slate-100/90 rounded-lg p-0.5 text-xs">
+                <button
+                  onClick={handlePrevPeriod}
+                  className="p-1 hover:bg-white rounded text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                  title="Anterior"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
 
-        {/* Category Filter */}
-        <select
-          value={selectedCategory}
-          onChange={(e) => setSelectedCategory(e.target.value)}
-          className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium outline-hidden"
-        >
-          <option value="all">Todas las categorías</option>
-          {categories.map(cat => (
-            <option key={cat.id} value={cat.id}>
-              {cat.name}
-            </option>
-          ))}
-        </select>
+                <div className="px-2 font-semibold text-slate-900 flex items-center gap-1.5">
+                  <Calendar className="w-3 h-3 text-slate-500" />
+                  <span>{activePeriodRange.label}</span>
+                  <span className="text-[10px] font-mono text-slate-500 font-normal">
+                    ({activePeriodRange.startDate} a {activePeriodRange.endDate})
+                  </span>
+                </div>
 
-        {/* Account Filter */}
-        <select
-          value={selectedAccount}
-          onChange={(e) => setSelectedAccount(e.target.value)}
-          className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700 font-medium outline-hidden"
-        >
-          <option value="all">Todas las cuentas</option>
-          {accounts.map(acc => (
-            <option key={acc.id} value={acc.id}>
-              {acc.name}
-            </option>
-          ))}
-        </select>
+                <button
+                  onClick={handleNextPeriod}
+                  className="p-1 hover:bg-white rounded text-slate-600 hover:text-slate-900 transition-colors cursor-pointer"
+                  title="Siguiente"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
 
-        {/* Reset */}
-        {(searchQuery || selectedType !== 'all' || selectedCategory !== 'all' || selectedAccount !== 'all') && (
-          <button
-            onClick={() => {
-              setSearchQuery('');
-              setSelectedType('all');
-              setSelectedCategory('all');
-              setSelectedAccount('all');
-            }}
-            className="text-xs text-slate-500 hover:text-slate-900 underline font-medium cursor-pointer"
-          >
-            Limpiar filtros
-          </button>
+            <button
+              onClick={() => setCurrentPeriod({ year: 2026, month: 9, quarter: 4 })}
+              className="text-[11px] text-slate-500 hover:text-blue-600 flex items-center gap-1 cursor-pointer"
+              title="Volver al período actual"
+            >
+              <RotateCcw className="w-3 h-3" />
+              <span>Octubre 2026</span>
+            </button>
+          </div>
         )}
+
       </div>
 
-      {/* Ledger Table (High Density Data Grid with Tabular Numerals) */}
+      {/* Ledger Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-slate-50/80 text-slate-500 font-semibold border-b border-slate-200 uppercase tracking-wider text-[11px]">
               <tr>
                 <th className="py-3 px-4">Fecha</th>
-                <th className="py-3 px-4">Descripción &amp; Comercio</th>
+                <th className="py-3 px-4">Concepto &amp; Movimiento</th>
                 <th className="py-3 px-4">Cuenta</th>
                 <th className="py-3 px-4">Categoría / Subcategoría</th>
                 <th className="py-3 px-4">Ámbito &amp; Usuario</th>
-                <th className="py-3 px-4 text-right">Monto</th>
+                <th className="py-3 px-4 text-right">Importe</th>
                 <th className="py-3 px-4 text-center">Ticket</th>
-                <th className="py-3 px-4 text-right">Acción</th>
+                <th className="py-3 px-4 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -240,10 +377,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                         {tx.date}
                       </td>
 
-                      {/* Concepto */}
+                      {/* Concepto y Movimiento */}
                       <td className="py-3 px-4 max-w-xs">
-                        <div className="flex items-center gap-2">
-                          <div className={`p-1 rounded shrink-0 ${
+                        <div className="flex items-start gap-2">
+                          <div className={`p-1 rounded shrink-0 mt-0.5 ${
                             isIncome ? 'text-emerald-700 bg-emerald-50' : 
                             isTransfer ? 'text-blue-700 bg-blue-50' : 
                             'text-slate-600 bg-slate-100'
@@ -256,7 +393,13 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                             <span className="font-semibold text-slate-900 block truncate">
                               {tx.description}
                             </span>
-                            {tx.originalRawDescription && tx.originalRawDescription !== tx.description && (
+                            {/* Movimiento / Detalle bancario */}
+                            {tx.movement && (
+                              <span className="inline-block mt-0.5 text-[10px] font-medium px-1.5 py-0.2 bg-slate-100 text-slate-600 rounded">
+                                {tx.movement}
+                              </span>
+                            )}
+                            {tx.originalRawDescription && tx.originalRawDescription !== tx.description && !tx.movement && (
                               <span className="text-[10px] text-slate-400 font-mono block truncate">
                                 Raw: {tx.originalRawDescription}
                               </span>
@@ -277,21 +420,32 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                         )}
                       </td>
 
-                      {/* Categoría / Subcategoría (Clean unboxed text metadata) */}
+                      {/* Categoría / Subcategoría */}
                       <td className="py-3 px-4 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5 text-xs text-slate-700">
-                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }}></span>
-                          <span className="font-medium">{catName}</span>
-                          {subName && (
-                            <>
-                              <span className="text-slate-300">/</span>
-                              <span className="text-slate-500">{subName}</span>
-                            </>
-                          )}
-                        </div>
+                        {!tx.categoryId || tx.categoryId === 'cat_uncategorized' ? (
+                          <button
+                            onClick={() => onEditTransaction(tx)}
+                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100 transition-colors cursor-pointer"
+                            title="Haz clic para clasificar este movimiento"
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                            <span>⚠️ Sin Categorizar</span>
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-1.5 text-xs text-slate-700">
+                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }}></span>
+                            <span className="font-medium">{catName}</span>
+                            {subName && (
+                              <>
+                                <span className="text-slate-300">/</span>
+                                <span className="text-slate-500">{subName}</span>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </td>
 
-                      {/* Ámbito & Usuario (Clean unboxed text metadata) */}
+                      {/* Ámbito & Usuario */}
                       <td className="py-3 px-4 whitespace-nowrap text-slate-600">
                         <div className="flex items-center gap-1.5 text-xs">
                           <span className="font-medium text-slate-800 capitalize">{tx.scope}</span>
@@ -300,14 +454,14 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                         </div>
                       </td>
 
-                      {/* Monto (Tabular Numerals) */}
+                      {/* Importe en Euros */}
                       <td className="py-3 px-4 text-right font-mono tabular-nums font-bold whitespace-nowrap">
                         <span className={
                           isIncome ? 'text-emerald-700' :
                           isTransfer ? 'text-blue-700' :
                           'text-slate-900'
                         }>
-                          {isIncome ? '+' : isExpense ? '-' : ''}${tx.amount.toFixed(2)}
+                          {formatEuro(isIncome ? tx.amount : isExpense ? -tx.amount : tx.amount, { showSign: isIncome || isExpense })}
                         </span>
                       </td>
 
@@ -328,13 +482,22 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
 
                       {/* Acciones */}
                       <td className="py-3 px-4 text-right whitespace-nowrap">
-                        <button
-                          onClick={() => onDeleteTransaction(tx.id)}
-                          title="Eliminar movimiento"
-                          className="text-slate-400 hover:text-rose-600 transition-colors p-1 cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="inline-flex items-center gap-1">
+                          <button
+                            onClick={() => onEditTransaction(tx)}
+                            title="Editar movimiento (revisa similitudes si cambias categoría)"
+                            className="text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded p-1 transition-colors cursor-pointer"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => onDeleteTransaction(tx.id)}
+                            title="Eliminar movimiento"
+                            className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded p-1 transition-colors cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -347,7 +510,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
         {/* Ledger Footer */}
         <div className="bg-slate-50 px-4 py-2.5 border-t border-slate-200 text-xs text-slate-500 flex items-center justify-between">
           <span>Mostrando <strong>{filtered.length}</strong> de <strong>{transactions.length}</strong> movimientos registrados</span>
-          <span className="font-mono">Invariante de Libro Mayor: Verificado</span>
+          <span className="font-mono">Moneda base: Euro (€)</span>
         </div>
       </div>
 
@@ -382,9 +545,15 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                   <span className="text-slate-500">Concepto:</span>
                   <span className="font-semibold">{selectedReceiptTx.description}</span>
                 </div>
+                {selectedReceiptTx.movement && (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Movimiento:</span>
+                    <span className="font-medium text-slate-700">{selectedReceiptTx.movement}</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
-                  <span className="text-slate-500">Monto:</span>
-                  <span className="font-mono font-bold">${selectedReceiptTx.amount.toFixed(2)}</span>
+                  <span className="text-slate-500">Importe:</span>
+                  <span className="font-mono font-bold">{formatEuro(selectedReceiptTx.amount)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-slate-500">Fecha del movimiento:</span>

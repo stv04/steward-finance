@@ -1,6 +1,7 @@
 import React from 'react';
 import { Calendar } from 'lucide-react';
 import { FinancialAccount } from '../../types/finance';
+import { formatEuro } from '../../utils/formatters';
 
 interface CardAccountCardProps {
   acc: FinancialAccount;
@@ -16,7 +17,7 @@ export const CardAccountCard: React.FC<CardAccountCardProps> = ({
   const utilizationPercent = isCredit && acc.creditLimit ? (Math.abs(acc.balance) / acc.creditLimit) * 100 : 0;
 
   const linked = accounts.find(a => a.id === acc.linkedAccountId);
-  const linkedName = linked ? linked.name : 'Cuenta Corriente Santander';
+  const linkedName = linked ? linked.name : 'Cuenta Corriente';
 
   return (
     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
@@ -48,7 +49,7 @@ export const CardAccountCard: React.FC<CardAccountCardProps> = ({
             <div className="pt-2 border-t border-slate-200/80">
               <div className="flex justify-between text-[11px] mb-1 text-slate-500">
                 <span>Uso de Línea ({utilizationPercent.toFixed(0)}%)</span>
-                <span>Límite: ${acc.creditLimit?.toLocaleString()}</span>
+                <span>Límite: {formatEuro(acc.creditLimit, { maximumFractionDigits: 0 })}</span>
               </div>
               <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
                 <div 
@@ -73,7 +74,7 @@ export const CardAccountCard: React.FC<CardAccountCardProps> = ({
             {isCredit ? 'Saldo Consumido (Deuda Actual)' : 'Saldo Disponible'}
           </span>
           <span className={`text-xl font-bold font-mono tabular-nums ${isCredit ? 'text-rose-600' : 'text-slate-950'}`}>
-            ${Math.abs(acc.balance).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {formatEuro(acc.balance)}
           </span>
         </div>
 
@@ -81,7 +82,7 @@ export const CardAccountCard: React.FC<CardAccountCardProps> = ({
           <div className="text-right">
             <span className="text-[11px] text-slate-500 block">Crédito Disponible</span>
             <span className="text-sm font-semibold font-mono text-emerald-700">
-              ${availableCredit.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {formatEuro(availableCredit)}
             </span>
           </div>
         )}

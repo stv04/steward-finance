@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { BudgetAccord, BudgetEnvelope, ParentCategory, ScopeType, Transaction, UserProfile } from '../types/finance';
 import { calculateMonthBudgetSummary, MonthBudgetSummary } from '../utils/budgetEngine';
+import { formatEuro } from '../utils/formatters';
 
 interface BudgetsViewProps {
   accords: BudgetAccord[];
@@ -205,7 +206,7 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
           <span className="text-xs text-slate-500 font-medium block">Ingresos del Mes</span>
           <div className="text-xl font-bold font-mono tabular-nums text-emerald-700 mt-1">
-            ${summary.totalIncomePeriod.toFixed(2)}
+            {formatEuro(summary.totalIncomePeriod)}
           </div>
           <span className="text-[11px] text-slate-400 mt-1 block">Nóminas y rendimientos registrados</span>
         </div>
@@ -214,7 +215,7 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
           <span className="text-xs text-slate-500 font-medium block">Total Asignado a Sobres</span>
           <div className="text-xl font-bold font-mono tabular-nums text-slate-900 mt-1">
-            ${summary.totalBudgetedPeriod.toFixed(2)}
+            {formatEuro(summary.totalBudgetedPeriod)}
           </div>
           <span className="text-[11px] text-slate-400 mt-1 block">Límite acordado en el pacto</span>
         </div>
@@ -223,7 +224,7 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
           <span className="text-xs text-slate-500 font-medium block">Gasto Realizado</span>
           <div className="text-xl font-bold font-mono tabular-nums text-slate-950 mt-1">
-            ${summary.totalRealizedExpensePeriod.toFixed(2)}
+            {formatEuro(summary.totalRealizedExpensePeriod)}
           </div>
           <span className="text-[11px] text-slate-400 mt-1 block">
             {summary.totalBudgetedPeriod > 0 
@@ -238,11 +239,11 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
           <div className={`text-xl font-bold font-mono tabular-nums mt-1 ${
             summary.zeroBasedUnassigned >= 0 ? 'text-blue-700' : 'text-rose-700'
           }`}>
-            ${summary.zeroBasedUnassigned.toFixed(2)}
+            {formatEuro(summary.zeroBasedUnassigned)}
           </div>
           <span className="text-[11px] text-slate-400 mt-1 block">
             {summary.zeroBasedUnassigned === 0 
-              ? 'Zero-Based perfecto (Todo dólar asignado)' 
+              ? 'Zero-Based perfecto (Todo euro asignado)' 
               : summary.zeroBasedUnassigned > 0 ? 'Superávit disponible para ahorro' : 'Déficit presupuestario'}
           </span>
         </div>
@@ -307,7 +308,7 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
                   {/* Progress Bar */}
                   <div className="space-y-1.5 my-3">
                     <div className="flex justify-between text-xs">
-                      <span className="text-slate-500">Ejecutado: <strong className="font-mono text-slate-800">${env.realizedAmount.toFixed(2)}</strong></span>
+                      <span className="text-slate-500">Ejecutado: <strong className="font-mono text-slate-800">{formatEuro(env.realizedAmount)}</strong></span>
                       <span className="font-mono font-bold text-slate-700">{env.percentSpent.toFixed(0)}%</span>
                     </div>
                     <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
@@ -328,14 +329,14 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
                     <span className={`font-mono font-bold text-sm tabular-nums ${
                       env.availableAmount < 0 ? 'text-rose-700' : 'text-slate-900'
                     }`}>
-                      {env.availableAmount < 0 ? '-' : ''}${Math.abs(env.availableAmount).toFixed(2)}
+                      {formatEuro(env.availableAmount)}
                     </span>
                   </div>
 
                   <div className="text-right">
                     <span className="text-[11px] text-slate-400 block">Presupuestado</span>
                     <span className="font-mono font-semibold text-slate-600 tabular-nums">
-                      ${env.budgetedAmount.toFixed(2)}
+                      {formatEuro(env.budgetedAmount)}
                     </span>
                   </div>
                 </div>
@@ -387,7 +388,7 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-2">
-                  Asignación por Sobre de Categoría ($ USD)
+                  Asignación por Sobre de Categoría (€ EUR)
                 </label>
                 <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
                   {categories.filter(c => c.type === 'expense').map(cat => (
@@ -397,7 +398,6 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
                         <span className="font-medium text-slate-800 truncate">{cat.name}</span>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
-                        <span className="text-slate-400 font-mono">$</span>
                         <input
                           type="number"
                           step="10"
@@ -409,6 +409,7 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
                           }}
                           className="w-24 px-2 py-1 text-xs font-mono tabular-nums border border-slate-300 rounded text-right bg-white"
                         />
+                        <span className="text-slate-500 font-mono text-xs">€</span>
                       </div>
                     </div>
                   ))}

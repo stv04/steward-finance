@@ -62,7 +62,7 @@ export interface ParentCategory {
 export interface Transaction {
   id: string;
   userId: string;
-  date: string; // YYYY-MM-DD
+  date: string; // Canonical format: 'YYYY-MM-DD'
   amount: number;
   type: TransactionType;
   accountId: string;
@@ -72,6 +72,7 @@ export interface Transaction {
   scope: ScopeType;
   description: string;
   originalRawDescription?: string;
+  movement?: string; // Detalle bancario opcional (ej: "Cargo", "Abono", "TPV Tarjeta Débito", "Bizum", "Recibo domiciliado")
   attachmentUrl?: string;
   attachmentName?: string;
   hash: string; // SHA-256 of Date + Amount + Normalized Description + AccountId
@@ -103,6 +104,7 @@ export interface ReconciledRawItem {
   rawDescription: string;
   rawAmount: number;
   rawAccount: string;
+  rawMovement?: string;
   matchedCategoryId?: string;
   matchedSubcategoryId?: string;
   isDuplicate: boolean;

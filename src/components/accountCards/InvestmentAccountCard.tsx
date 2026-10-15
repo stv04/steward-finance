@@ -1,6 +1,7 @@
 import React from 'react';
 import { Percent, Trash2 } from 'lucide-react';
 import { FinancialAccount } from '../../types/finance';
+import { formatEuro } from '../../utils/formatters';
 
 interface InvestmentAccountCardProps {
   acc: FinancialAccount;
@@ -80,7 +81,7 @@ export const InvestmentAccountCard: React.FC<InvestmentAccountCardProps> = ({
           ) : (
             <div className="flex items-baseline gap-2">
               <span className="text-xl font-bold font-mono tabular-nums text-emerald-950">
-                ${acc.balance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatEuro(acc.balance)}
               </span>
               <button
                 onClick={() => onStartEditBalance(acc)}
