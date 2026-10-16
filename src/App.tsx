@@ -687,6 +687,7 @@ function MainApp() {
                   setEditingTransaction(tx);
                   setIsTxModalOpen(true);
                 }}
+                onAssignCategoryToTransaction={handleAssignCategoryToTransaction}
                 onOpenReconciliation={() => setIsReconciliationModalOpen(true)}
                 onDeleteTransaction={handleDeleteTransaction}
               />

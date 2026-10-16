@@ -20,6 +20,8 @@ interface TransactionModalProps {
   activeScope: ScopeType;
 }
 
+let outScopedDate = null
+
 export const TransactionModal: React.FC<TransactionModalProps> = ({
   isOpen,
   onClose,
@@ -35,7 +37,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   activeScope,
 }) => {
   const [type, setType] = useState<TransactionType>(initialType);
-  const [date, setDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState<string>(outScopedDate ?? new Date().toISOString().split('T')[0]);
   const [amount, setAmount] = useState<string>('');
   const [accountId, setAccountId] = useState<string>(initialOriginAccountId || accounts[0]?.id || '');
   const [destinationAccountId, setDestinationAccountId] = useState<string>(accounts[1]?.id || '');
@@ -48,6 +50,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [attachmentUrl, setAttachmentUrl] = useState<string>('');
   const [attachmentName, setAttachmentName] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
+
+  const existentDescriptions = Array.from(new Set(existingTransactions.map(t => t.description).filter(Boolean)));
+  const existentMovements = Array.from(new Set(existingTransactions.map(t => t.movement).filter(Boolean)));
 
   // Prompt state for bulk updating similar transactions when category changes
   const [bulkPrompt, setBulkPrompt] = useState<{
@@ -76,7 +81,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setBulkPrompt(null);
     } else {
       setType(initialType);
-      setDate(new Date().toISOString().split('T')[0]);
+      setDate(outScopedDate ?? new Date().toISOString().split('T')[0]);
       setAmount('');
       setAccountId(initialOriginAccountId || accounts[0]?.id || '');
       setDestinationAccountId(accounts[1]?.id || '');
@@ -115,6 +120,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     setAttachmentUrl(sampleReceipts[Math.floor(Math.random() * sampleReceipts.length)]);
     setAttachmentName(`recibo_ticket_${Date.now().toString().slice(-4)}.jpg`);
   };
+
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -199,6 +205,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     setBulkPrompt(null);
     onClose();
   };
+
+  const handleChangeDate = (date: string) => {
+    setDate(date);
+    outScopedDate = date;
+  }
 
   const selectedCategoryObj = categories.find(c => c.id === categoryId);
   const selectedSubcategoryObj = selectedCategoryObj?.subcategories.find(s => s.id === subcategoryId);
@@ -290,10 +301,45 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   type="date"
                   required
                   value={date}
-                  onChange={(e) => setDate(e.target.value)}
+                  onChange={(e) => handleChangeDate(e.target.value)}
                   className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-lg focus:outline-hidden focus:border-slate-500"
                 />
               </div>
+            </div>
+
+            {/* Descripción */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Descripción / Concepto</label>
+              <input
+                type="text"
+                list='descriptions-datalist'
+                required
+                placeholder="Ej. Compra semanal Mercadona, Nómina de Carlos, Alquiler vivienda..."
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:border-slate-500"
+              />
+              <datalist id='descriptions-datalist'>
+                {existentDescriptions.map(d => (<option value={d}></option>))}
+              </datalist>
+            </div>
+
+            {/* Movimiento / Detalle Bancario (Opcional) */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Tipo de Movimiento / Detalle Bancario <span className="text-slate-400 font-normal">(Opcional)</span>
+              </label>
+              <input
+                type="text"
+                list='movements-datalist'
+                placeholder="Ej. Pago con Tarjeta Débito BBVA, Cargo domiciliado, Bizum, Abono nómina..."
+                value={movement}
+                onChange={(e) => setMovement(e.target.value)}
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:border-slate-500"
+              />
+              <datalist id='movements-datalist'>
+                {existentMovements.map(d => (<option value={d}></option>))}
+              </datalist>
             </div>
 
             {/* Cuentas Origen / Destino */}
@@ -399,37 +445,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   ))}
                 </select>
               </div>
-            </div>
-
-            {/* Descripción */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Descripción / Concepto</label>
-              <input
-                type="text"
-                required
-                placeholder="Ej. Compra semanal Mercadona, Nómina de Carlos, Alquiler vivienda..."
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:border-slate-500"
-              />
-            </div>
-
-            {/* Movimiento / Detalle Bancario (Opcional) */}
-            <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">
-                Tipo de Movimiento / Detalle Bancario <span className="text-slate-400 font-normal">(Opcional)</span>
-              </label>
-              <input
-                type="text"
-                placeholder="Ej. Pago con Tarjeta Débito BBVA, Cargo domiciliado, Bizum, Abono nómina..."
-                value={movement}
-                onChange={(e) => setMovement(e.target.value)}
-                className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:border-slate-500"
-              />
-              <p className="text-[11px] text-slate-400 mt-1">
-                Permite recordar el medio de pago, tarjeta o canal bancario para categorizar y conciliar con facilidad.
-              </p>
-            </div>
+            </div> 
 
             {/* Adjunto comprobante */}
             <div>

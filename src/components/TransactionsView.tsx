@@ -30,6 +30,7 @@ interface TransactionsViewProps {
   onEditTransaction: (tx: Transaction) => void;
   onOpenReconciliation: () => void;
   onDeleteTransaction: (id: string) => void;
+  onAssignCategoryToTransaction?: (txId: string, categoryId: string, subcategoryId: string) => void;
 }
 
 export const TransactionsView: React.FC<TransactionsViewProps> = ({
@@ -43,6 +44,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   onEditTransaction,
   onOpenReconciliation,
   onDeleteTransaction,
+  onAssignCategoryToTransaction
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -434,13 +436,34 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                         ) : (
                           <div className="flex items-center gap-1.5 text-xs text-slate-700">
                             <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: color }}></span>
-                            <span className="font-medium">{catName}</span>
+                            {/* <span className="font-medium">{catName}</span>
                             {subName && (
                               <>
                                 <span className="text-slate-300">/</span>
                                 <span className="text-slate-500">{subName}</span>
                               </>
-                            )}
+                            )} */}
+                            <select
+                              onChange={(e) => {
+                                const selectedVal = e.target.value;
+                                if (!selectedVal) return;
+                                const [cId, sId] = selectedVal.split('::');
+                                if (onAssignCategoryToTransaction) {
+                                  onAssignCategoryToTransaction(tx.id, cId, sId || '');
+                                }
+                              }}
+                              className="border border-slate-100 rounded w-50 px-2.5 py-1 text-xs cursor-pointer"
+                            >
+                              {categories.map(c => (
+                                <optgroup key={c.id} label={c.name}>
+                                  {c.subcategories.map(s => (
+                                    <option key={s.id} value={`${c.id}::${s.id}`} selected={c.id === tx.categoryId && s.id === tx.subcategoryId}>
+                                      {c.name} / {s.name}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ))}
+                            </select>
                           </div>
                         )}
                       </td>

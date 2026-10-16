@@ -13,7 +13,7 @@ export const CardAccountCard: React.FC<CardAccountCardProps> = ({
   accounts = [],
 }) => {
   const isCredit = acc.accountType === 'card_credit';
-  const availableCredit = isCredit && acc.creditLimit ? acc.creditLimit - Math.abs(acc.balance) : 0;
+  const availableCredit = isCredit && acc.creditLimit ? acc.creditLimit + acc.balance : 0;
   const utilizationPercent = isCredit && acc.creditLimit ? (Math.abs(acc.balance) / acc.creditLimit) * 100 : 0;
 
   const linked = accounts.find(a => a.id === acc.linkedAccountId);
@@ -74,7 +74,7 @@ export const CardAccountCard: React.FC<CardAccountCardProps> = ({
             {isCredit ? 'Saldo Consumido (Deuda Actual)' : 'Saldo Disponible'}
           </span>
           <span className={`text-xl font-bold font-mono tabular-nums ${isCredit ? 'text-rose-600' : 'text-slate-950'}`}>
-            {formatEuro(acc.balance)}
+            {formatEuro(-acc.balance)}
           </span>
         </div>
 

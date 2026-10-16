@@ -8,12 +8,14 @@ import {
   query,
   orderBy,
   where,
-  QueryConstraint
+  QueryConstraint,
+  getDoc
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { FinancialAccount, Transaction, BudgetAccord, ParentCategory } from '../types/finance';
 import { INITIAL_BUDGET_ACCORDS, INITIAL_CATEGORIES } from '../data/mockData';
 import { normalizeAndValidateDate } from '../utils/dateUtils';
+import firebase from 'firebase/compat/app';
 
 /**
  * Sanitizes an object by removing undefined fields to satisfy Firestore payload constraints
@@ -312,6 +314,39 @@ export async function updateTransactionInFirestore(
   });
   batch.set(txRef, payload, { merge: true });
 
+  const accountDeltas = getAccountDeltasOnTransactionUpdate(previousTx, updatedTx);
+
+  // Apply deltas to accounts
+  for (const [accId, delta] of accountDeltas.entries()) {
+    if (delta !== 0) {
+      const acc = currentAccounts.find(a => a.id === accId);
+      if (acc) {
+        const accRef = doc(db, 'families', familyId, 'accounts', accId);
+        batch.set(accRef, { balance: acc.balance + delta }, { merge: true });
+      }
+    }
+  }
+
+  // 3. Propagate Category/Subcategory to similar transactions if requested by user
+  if (similarTxIdsToUpdateCategory && similarTxIdsToUpdateCategory.length > 0) {
+    for (const simId of similarTxIdsToUpdateCategory) {
+      const simRef = doc(db, 'families', familyId, 'transactions', simId);
+      batch.update(simRef, {
+        categoryId: updatedTx.categoryId,
+        subcategoryId: updatedTx.subcategoryId,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  try {
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, txPath);
+  }
+}
+
+function getAccountDeltasOnTransactionUpdate(previousTx: Transaction, updatedTx?: Transaction) {
   // 2. Calculate account balance corrections
   // Revert previous transaction impact
   const accountDeltas = new Map<string, number>();
@@ -346,44 +381,19 @@ export async function updateTransactionInFirestore(
     accountDeltas.set(prevDest, (accountDeltas.get(prevDest) || 0) + getRevertDelta(previousTx, true));
   }
 
-  // Apply new origin account
-  const newOrigAcc = updatedTx.accountId;
-  accountDeltas.set(newOrigAcc, (accountDeltas.get(newOrigAcc) || 0) + getApplyDelta(updatedTx));
-
-  // Apply new destination account if transfer
-  if (updatedTx.type === 'transfer' && updatedTx.destinationAccountId) {
-    const newDest = updatedTx.destinationAccountId;
-    accountDeltas.set(newDest, (accountDeltas.get(newDest) || 0) + getApplyDelta(updatedTx, true));
-  }
-
-  // Apply deltas to accounts
-  for (const [accId, delta] of accountDeltas.entries()) {
-    if (delta !== 0) {
-      const acc = currentAccounts.find(a => a.id === accId);
-      if (acc) {
-        const accRef = doc(db, 'families', familyId, 'accounts', accId);
-        batch.set(accRef, { balance: acc.balance + delta }, { merge: true });
-      }
+  if(updatedTx) {
+    // Apply new origin account
+    const newOrigAcc = updatedTx.accountId;
+    accountDeltas.set(newOrigAcc, (accountDeltas.get(newOrigAcc) || 0) + getApplyDelta(updatedTx));
+  
+    // Apply new destination account if transfer
+    if (updatedTx.type === 'transfer' && updatedTx.destinationAccountId) {
+      const newDest = updatedTx.destinationAccountId;
+      accountDeltas.set(newDest, (accountDeltas.get(newDest) || 0) + getApplyDelta(updatedTx, true));
     }
   }
 
-  // 3. Propagate Category/Subcategory to similar transactions if requested by user
-  if (similarTxIdsToUpdateCategory && similarTxIdsToUpdateCategory.length > 0) {
-    for (const simId of similarTxIdsToUpdateCategory) {
-      const simRef = doc(db, 'families', familyId, 'transactions', simId);
-      batch.update(simRef, {
-        categoryId: updatedTx.categoryId,
-        subcategoryId: updatedTx.subcategoryId,
-        updatedAt: new Date().toISOString(),
-      });
-    }
-  }
-
-  try {
-    await batch.commit();
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, txPath);
-  }
+  return accountDeltas;
 }
 
 /**
@@ -410,6 +420,8 @@ export async function bulkImportTransactionsToFirestore(
     const prevDelta = accountBalanceDeltas.get(tx.accountId) || 0;
     accountBalanceDeltas.set(tx.accountId, prevDelta + delta);
   }
+
+  console.log(accountBalanceDeltas);
 
   // Apply deltas to accounts
   for (const [accId, delta] of accountBalanceDeltas.entries()) {
@@ -477,9 +489,23 @@ export async function deleteTransactionFromFirestore(
 ): Promise<void> {
   const txPath = `families/${familyId}/transactions/${txId}`;
   const txRef = doc(db, 'families', familyId, 'transactions', txId);
+  const batch = writeBatch(db);
 
   try {
-    await deleteDoc(txRef);
+    const transaction = (await getDoc(txRef)).data() as Transaction;
+    
+    batch.delete(txRef);
+
+    const accountDeltas = getAccountDeltasOnTransactionUpdate(transaction);
+    for (const [accId, delta] of accountDeltas.entries()) {
+      if (delta !== 0) {
+        const accRef = doc(db, 'families', familyId, 'accounts', accId);
+        const acc = (await getDoc(accRef)).data();
+        batch.set(accRef, { balance: acc.balance + delta }, { merge: true });
+      }
+    }
+
+    batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, txPath);
   }

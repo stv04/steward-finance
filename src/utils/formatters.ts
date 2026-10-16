@@ -20,6 +20,7 @@ export function formatEuro(amount: number | undefined | null, options?: FormatEu
   const value = amount ?? 0;
   const minDigits = options?.minimumFractionDigits ?? 2;
   const maxDigits = options?.maximumFractionDigits ?? 2;
+  const safeMaxDigits = Math.max(minDigits, maxDigits);
 
   if (options?.compact && Math.abs(value) >= 1000) {
     if (Math.abs(value) >= 1000000) {
@@ -30,7 +31,7 @@ export function formatEuro(amount: number | undefined | null, options?: FormatEu
 
   const formattedAbs = Math.abs(value).toLocaleString('es-ES', {
     minimumFractionDigits: minDigits,
-    maximumFractionDigits: maxDigits,
+    maximumFractionDigits: safeMaxDigits,
   });
 
   if (value < 0) {

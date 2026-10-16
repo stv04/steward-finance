@@ -7,6 +7,7 @@ export interface RawCsvRow {
   description: string;
   movement?: string; // e.g. "Cargo", "Abono", "Pago con Tarjeta Débito", etc.
   amount: number;
+  net_amount: number;
   isIncome: boolean;
   account?: string;
 }
@@ -107,25 +108,9 @@ export function parseRawBankCsv(csvText: string): RawCsvRow[] {
     // 1. Check raw movement column: Cargo, Gasto, Débito vs Abono, Ingreso, Crédito
     // 2. Check sign of amount (- vs +)
     // 3. Fallback to concept cues
-    const movLower = rawMov.toLowerCase();
     let isIncome = false;
-
-    if (movLower.includes('abono') || movLower.includes('ingreso') || movLower.includes('crédito') || movLower.includes('credito') || movLower.includes('haber')) {
+    if (rawAmountStr.startsWith('+') || (numericAmount > 0 && !rawAmountStr.startsWith('-'))) {
       isIncome = true;
-    } else if (movLower.includes('cargo') || movLower.includes('gasto') || movLower.includes('débito') || movLower.includes('debito') || movLower.includes('debe')) {
-      isIncome = false;
-    } else {
-      // Check sign
-      if (rawAmountStr.startsWith('+') || (numericAmount > 0 && !rawAmountStr.startsWith('-'))) {
-        const descLower = rawDesc.toLowerCase();
-        if (descLower.includes('nomina') || descLower.includes('sueldo') || descLower.includes('abono') || descLower.includes('recibida') || descLower.includes('freelance')) {
-          isIncome = true;
-        } else if (rawAmountStr.startsWith('-')) {
-          isIncome = false;
-        } else {
-          isIncome = false;
-        }
-      }
     }
 
     const rawAccount = accountIdx !== -1 && row[accountIdx] ? row[accountIdx] : undefined;
@@ -135,6 +120,7 @@ export function parseRawBankCsv(csvText: string): RawCsvRow[] {
       description: rawDesc,
       movement: rawMov || (isIncome ? 'Abono / Ingreso' : 'Cargo / Gasto'),
       amount: Math.abs(numericAmount),
+      net_amount: numericAmount,
       isIncome,
       account: rawAccount,
     });
