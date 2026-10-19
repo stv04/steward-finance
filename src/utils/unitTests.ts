@@ -187,6 +187,91 @@ export function runUnitTests(
     });
   }
 
+  // Test 1.6: Detección Inteligente por Similitud (string-similarity) evaluando Concepto y Movimiento
+  try {
+    const t0 = performance.now();
+    const mockTxs: Transaction[] = [
+      {
+        id: 'tx_sim_mercadona_1',
+        userId: 'usr_carlos',
+        date: '2026-10-02',
+        amount: 48.20,
+        type: 'expense',
+        accountId: 'acc_checking_bbva',
+        categoryId: 'cat_alimentacion',
+        subcategoryId: 'sub_supermercado',
+        scope: 'familiar',
+        description: 'MERCADONA S.A. SUCURSAL 18',
+        movement: 'Cargo Tarjeta Débito',
+        hash: 'h_merc_1',
+        isReconciled: true,
+        createdAt: '2026-10-02T10:00:00Z',
+      },
+      {
+        id: 'tx_sim_mercadona_2',
+        userId: 'usr_carlos',
+        date: '2026-10-08',
+        amount: 32.50,
+        type: 'expense',
+        accountId: 'acc_checking_bbva',
+        categoryId: 'cat_alimentacion',
+        subcategoryId: 'sub_supermercado',
+        scope: 'familiar',
+        description: 'MERCADONA COMPRA ALIMENTACION',
+        movement: 'Cargo Tarjeta Débito',
+        hash: 'h_merc_2',
+        isReconciled: true,
+        createdAt: '2026-10-08T10:00:00Z',
+      },
+      {
+        id: 'tx_sim_gasolina',
+        userId: 'usr_carlos',
+        date: '2026-10-09',
+        amount: 60.00,
+        type: 'expense',
+        accountId: 'acc_checking_bbva',
+        categoryId: 'cat_transporte',
+        subcategoryId: 'sub_combustible',
+        scope: 'familiar',
+        description: 'ESTACION REPSOL GASOLEO',
+        movement: 'Cargo Tarjeta Débito',
+        hash: 'h_repsol',
+        isReconciled: true,
+        createdAt: '2026-10-09T10:00:00Z',
+      }
+    ];
+
+    const targetQuery = {
+      id: 'tx_sim_mercadona_1',
+      description: 'MERCADONA S.A.',
+      movement: 'Cargo Tarjeta Débito'
+    };
+
+    const matches = findSimilarTransactionsForBulkCategorization(targetQuery, mockTxs, 0.40);
+    assert(matches.length >= 1, `Se esperaba al menos 1 coincidencia afín para Mercadona (encontradas: ${matches.length})`);
+    assert(matches[0].id === 'tx_sim_mercadona_2', `La coincidencia superior debe ser la otra transacción de Mercadona`);
+    assert(matches[0].similarityScore >= 40, `El puntaje de similitud debe ser >= 40 (obtenido: ${matches[0].similarityScore}%)`);
+
+    const duration = performance.now() - t0;
+    results.push({
+      id: 'test_string_similarity_concept_movement',
+      suite: 'Motor de Conciliación Bancaria',
+      title: 'Algoritmo string-similarity Integrado con Concepto y Movimiento Bancario',
+      passed: true,
+      durationMs: Number(duration.toFixed(2)),
+      details: `Coincidencia "${matches[0].description}" con afinidad calculada del ${matches[0].similarityScore}%.`,
+    });
+  } catch (err: any) {
+    results.push({
+      id: 'test_string_similarity_concept_movement',
+      suite: 'Motor de Conciliación Bancaria',
+      title: 'Algoritmo string-similarity Integrado con Concepto y Movimiento',
+      passed: false,
+      durationMs: 0,
+      error: err.message,
+    });
+  }
+
   // --- SUITE 2: MOTOR DE PRESUPUESTACIÓN CONTINUA Y HERENCIA RECURSIVA ---
 
   // Test 2.1: Regla de Herencia Continuada a través de meses futuros

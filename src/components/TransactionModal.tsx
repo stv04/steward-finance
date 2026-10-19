@@ -4,6 +4,7 @@ import { FinancialAccount, ParentCategory, ScopeType, Transaction, TransactionTy
 import { computeSyncTransactionHash } from '../utils/crypto';
 import { findSimilarTransactionsForBulkCategorization } from '../utils/reconciliation';
 import { normalizeAndValidateDate } from '../utils/dateUtils';
+import { formatEuro } from '../utils/formatters';
 
 interface TransactionModalProps {
   isOpen: boolean;
@@ -20,7 +21,7 @@ interface TransactionModalProps {
   activeScope: ScopeType;
 }
 
-let outScopedDate = null
+let outScopedDate: string | null = null;
 
 export const TransactionModal: React.FC<TransactionModalProps> = ({
   isOpen,
@@ -55,11 +56,21 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const existentMovements = Array.from(new Set(existingTransactions.map(t => t.movement).filter(Boolean)));
 
   // Prompt state for bulk updating similar transactions when category changes
+  const [selectedSimilarTxIds, setSelectedSimilarTxIds] = useState<string[]>([]);
   const [bulkPrompt, setBulkPrompt] = useState<{
     pendingTx: Transaction;
     similarTxIds: string[];
     similarCount: number;
     targetDescription: string;
+    targetMovement?: string;
+    similarItems?: Array<{
+      id: string;
+      date: string;
+      description: string;
+      movement?: string;
+      amount: number;
+      similarityScore: number;
+    }>;
   } | null>(null);
 
   useEffect(() => {
@@ -170,17 +181,33 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
       if (categoryChanged && existingTransactions.length > 0) {
         const similar = findSimilarTransactionsForBulkCategorization(
-          description.trim(),
-          editingTransaction.id,
-          existingTransactions
+          {
+            id: editingTransaction.id,
+            description: description.trim(),
+            movement: movement.trim() || undefined,
+            type,
+          },
+          existingTransactions,
+          0.45
         );
 
         if (similar.length > 0) {
+          const allIds = similar.map(s => s.id);
+          setSelectedSimilarTxIds(allIds);
           setBulkPrompt({
             pendingTx: updatedTx,
-            similarTxIds: similar.map(s => s.id),
+            similarTxIds: allIds,
             similarCount: similar.length,
             targetDescription: description.trim(),
+            targetMovement: movement.trim() || undefined,
+            similarItems: similar.map(s => ({
+              id: s.id,
+              date: s.date,
+              description: s.description,
+              movement: s.movement,
+              amount: s.amount,
+              similarityScore: s.similarityScore,
+            })),
           });
           return;
         }
@@ -192,6 +219,21 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     onClose();
   };
 
+  const handleToggleSelectSimilar = (id: string) => {
+    setSelectedSimilarTxIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllSimilar = () => {
+    if (!bulkPrompt?.similarItems) return;
+    setSelectedSimilarTxIds(bulkPrompt.similarItems.map(s => s.id));
+  };
+
+  const handleDeselectAllSimilar = () => {
+    setSelectedSimilarTxIds([]);
+  };
+
   const handleApplySingleOnly = () => {
     if (!bulkPrompt) return;
     onSave(bulkPrompt.pendingTx, []);
@@ -199,9 +241,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     onClose();
   };
 
-  const handleApplyToAllSimilar = () => {
+  const handleApplySelectedSimilar = () => {
     if (!bulkPrompt) return;
-    onSave(bulkPrompt.pendingTx, bulkPrompt.similarTxIds);
+    onSave(bulkPrompt.pendingTx, selectedSimilarTxIds);
     setBulkPrompt(null);
     onClose();
   };
@@ -513,18 +555,103 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               </div>
             </div>
 
-            <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-700 space-y-2">
+            <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-700 space-y-2.5">
               <p className="font-medium text-slate-900">
-                Se encontraron <strong>{bulkPrompt.similarCount}</strong> transacciones existentes con concepto similar a:
+                Se encontraron <strong>{bulkPrompt.similarCount}</strong> transacciones existentes analizadas con <code>string-similarity</code> por concepto y movimiento:
               </p>
-              <div className="font-mono text-slate-800 bg-white p-2.5 rounded border border-slate-200 text-xs font-semibold">
-                "{bulkPrompt.targetDescription}"
+              
+              <div className="bg-white p-2.5 rounded border border-slate-200 space-y-1">
+                <div className="flex items-center justify-between text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
+                  <span>Concepto base</span>
+                  {bulkPrompt.targetMovement && <span>Movimiento</span>}
+                </div>
+                <div className="flex items-center justify-between gap-2 font-mono text-slate-900 text-xs font-bold">
+                  <span className="truncate">"{bulkPrompt.targetDescription}"</span>
+                  {bulkPrompt.targetMovement && (
+                    <span className="px-1.5 py-0.5 bg-slate-100 rounded text-[11px] text-slate-700 shrink-0">
+                      {bulkPrompt.targetMovement}
+                    </span>
+                  )}
+                </div>
               </div>
-              <p className="text-slate-600 mt-2">
-                ¿Deseas aplicar la nueva clasificación <strong>"{selectedCategoryObj?.name || 'Sin Categorizar'} {selectedSubcategoryObj ? ` / ${selectedSubcategoryObj.name}` : ''}"</strong> a todas las transacciones similares, o solo a la editada?
+
+              {/* Sample matches preview with individual Checkboxes */}
+              {bulkPrompt.similarItems && bulkPrompt.similarItems.length > 0 && (
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-slate-600 font-semibold">
+                      Transacciones coincidentes ({selectedSimilarTxIds.length}/{bulkPrompt.similarItems.length} seleccionadas):
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSelectAllSimilar}
+                        className="text-blue-700 hover:text-blue-900 font-semibold cursor-pointer"
+                      >
+                        Todas
+                      </button>
+                      <span className="text-slate-300">·</span>
+                      <button
+                        type="button"
+                        onClick={handleDeselectAllSimilar}
+                        className="text-slate-500 hover:text-slate-800 cursor-pointer"
+                      >
+                        Ninguna
+                      </button>
+                    </div>
+                  </div>
+
+                  <p className="text-[10px] text-slate-500">
+                    Desmarca con el checkbox cualquier movimiento que no corresponda (falso positivo):
+                  </p>
+
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {bulkPrompt.similarItems.map(item => {
+                      const isChecked = selectedSimilarTxIds.includes(item.id);
+
+                      return (
+                        <div 
+                          key={item.id} 
+                          onClick={() => handleToggleSelectSimilar(item.id)}
+                          className={`p-2 rounded-lg border flex items-center justify-between gap-2.5 text-[11px] cursor-pointer transition-colors ${
+                            isChecked ? 'bg-blue-50/70 border-blue-300 shadow-xs' : 'bg-slate-50/60 border-slate-200 opacity-60'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 truncate">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => handleToggleSelectSimilar(item.id)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer shrink-0"
+                            />
+                            <div className="truncate">
+                              <span className="font-semibold text-slate-900 truncate block">{item.description}</span>
+                              <span className="text-[10px] text-slate-500 block">
+                                {item.date} {item.movement ? `· ${item.movement}` : ''}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <span className="font-mono font-bold text-slate-900 block">{formatEuro(item.amount)}</span>
+                            <span className="text-[10px] font-semibold text-blue-700 bg-blue-100/70 px-1.5 py-0.2 rounded">
+                              {item.similarityScore}% cercanía
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <p className="text-slate-600 pt-1">
+                ¿Deseas aplicar la nueva clasificación <strong>"{selectedCategoryObj?.name || 'Sin Categorizar'} {selectedSubcategoryObj ? ` / ${selectedSubcategoryObj.name}` : ''}"</strong> a las transacciones seleccionadas?
               </p>
+              
               <div className="p-2 bg-blue-50/70 border border-blue-200 rounded text-[11px] text-blue-800">
-                <strong>Nota:</strong> Cualquier otra modificación (monto, fecha, cuenta) influirá exclusivamente a la transacción que acabas de editar.
+                <strong>Nota:</strong> Los demás atributos (monto, fecha, cuenta) influirán exclusivamente a la transacción actual.
               </div>
             </div>
 
@@ -538,11 +665,16 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
               </button>
               <button
                 type="button"
-                onClick={handleApplyToAllSimilar}
-                className="px-4 py-2 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors shadow-xs cursor-pointer flex items-center gap-1.5"
+                disabled={selectedSimilarTxIds.length === 0}
+                onClick={handleApplySelectedSimilar}
+                className={`px-4 py-2 text-xs font-semibold text-white rounded-lg transition-colors shadow-xs flex items-center gap-1.5 ${
+                  selectedSimilarTxIds.length > 0 
+                    ? 'bg-blue-700 hover:bg-blue-800 cursor-pointer' 
+                    : 'bg-slate-300 cursor-not-allowed'
+                }`}
               >
                 <Check className="w-4 h-4" />
-                <span>Actualizar todas las similares ({bulkPrompt.similarCount})</span>
+                <span>Actualizar seleccionadas ({selectedSimilarTxIds.length})</span>
               </button>
             </div>
           </div>

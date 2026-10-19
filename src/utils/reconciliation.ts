@@ -1,3 +1,4 @@
+import stringSimilarity from 'string-similarity';
 import { Transaction, ParentCategory } from '../types/finance';
 import { normalizeDescription, computeSyncTransactionHash } from './crypto';
 import { normalizeAndValidateDate } from './dateUtils';
@@ -25,7 +26,40 @@ export interface ReconciliationResultItem {
 }
 
 /**
- * Calculates token similarity between two normalized strings (Jaccard token similarity)
+ * Calculates string similarity using the 'string-similarity' library (Dice Coefficient)
+ * with robust token overlap and avoiding false-positive substring matching.
+ */
+export function calculateStringSimilarity(a: string, b: string): number {
+  const normA = normalizeDescription(a);
+  const normB = normalizeDescription(b);
+  if (!normA || !normB) return 0;
+  if (normA === normB) return 1.0;
+
+  const dice = stringSimilarity.compareTwoStrings(normA, normB);
+
+  // Token-level check: ignore common short words to focus on meaningful merchant keywords
+  const stopWords = new Set(['de', 'la', 'el', 'en', 'los', 'las', 'un', 'una', 'por', 'con', 'para', 'del', 'al', 'sa', 'sl', 's', 'a', 'y', 'o']);
+  const tokensA = normA.split(' ').filter(w => w.length >= 3 && !stopWords.has(w));
+  const tokensB = normB.split(' ').filter(w => w.length >= 3 && !stopWords.has(w));
+
+  if (tokensA.length > 0 && tokensB.length > 0) {
+    // Check meaningful keyword overlap
+    const sharedTokens = tokensA.filter(tA => 
+      tokensB.some(tB => tB === tA || (tA.length >= 5 && tB.startsWith(tA)) || (tB.length >= 5 && tA.startsWith(tB)))
+    );
+
+    if (sharedTokens.length > 0) {
+      const tokenCoverage = (sharedTokens.length * 2) / (tokensA.length + tokensB.length);
+      // Give a balanced boost if significant merchant tokens match, but do not override non-similar strings
+      return Math.max(dice, tokenCoverage * 0.85);
+    }
+  }
+
+  return dice;
+}
+
+/**
+ * Calculates token similarity between two normalized strings (legacy Jaccard token similarity)
  */
 export function calculateTokenSimilarity(a: string, b: string): number {
   const normA = normalizeDescription(a);
@@ -42,6 +76,66 @@ export function calculateTokenSimilarity(a: string, b: string): number {
   const union = new Set([...tokensA, ...tokensB]);
 
   return intersection.size / union.size;
+}
+
+/**
+ * Compares two transactions evaluating BOTH Concept (description) AND Movement (tipo/movimiento)
+ * using the 'string-similarity' closeness algorithm.
+ */
+export function calculateTransactionSimilarity(
+  target: { description: string; movement?: string; type?: string; isIncome?: boolean },
+  candidate: { description: string; originalRawDescription?: string; movement?: string; type?: string; isIncome?: boolean }
+): number {
+  // If transaction types or income/expense directions are explicitly contrasting, disqualify them!
+  const targetIsIncome = target.isIncome !== undefined 
+    ? target.isIncome 
+    : (target.type === 'income');
+  const candIsIncome = candidate.isIncome !== undefined 
+    ? candidate.isIncome 
+    : (candidate.type === 'income');
+
+  if (target.type && candidate.type && target.type !== candidate.type) {
+    return 0; // Incompatible transaction types (e.g. expense vs income vs transfer)
+  }
+  if (target.isIncome !== undefined && candidate.isIncome !== undefined && targetIsIncome !== candIsIncome) {
+    return 0; // Incompatible directions
+  }
+
+  const targetConcept = target.description;
+  const candidateConcept = candidate.originalRawDescription || candidate.description;
+
+  const conceptScore = calculateStringSimilarity(targetConcept, candidateConcept);
+
+  // Evaluate movement compatibility and closeness if movement is available
+  if (target.movement && candidate.movement) {
+    const normTargetMov = normalizeDescription(target.movement);
+    const normCandMov = normalizeDescription(candidate.movement);
+
+    if (normTargetMov && normCandMov) {
+      // Check for opposing movement types (e.g. Cargo vs Abono)
+      const isTargetDebit = normTargetMov.includes('cargo') || normTargetMov.includes('gasto') || normTargetMov.includes('debito') || normTargetMov.includes('pago');
+      const isCandDebit = normCandMov.includes('cargo') || normCandMov.includes('gasto') || normCandMov.includes('debito') || normCandMov.includes('pago');
+      const isTargetCredit = normTargetMov.includes('abono') || normTargetMov.includes('ingreso') || normTargetMov.includes('nomina');
+      const isCandCredit = normCandMov.includes('abono') || normCandMov.includes('ingreso') || normCandMov.includes('nomina');
+
+      if ((isTargetDebit && isCandCredit) || (isTargetCredit && isCandDebit)) {
+        return 0; // Distinct movement directions
+      }
+
+      const movScore = (normTargetMov === normCandMov)
+        ? 1.0
+        : stringSimilarity.compareTwoStrings(normTargetMov, normCandMov);
+
+      // Both concept and movement must align
+      if (conceptScore >= 0.35) {
+        return (conceptScore * 0.70) + (movScore * 0.30);
+      } else {
+        return conceptScore * 0.5;
+      }
+    }
+  }
+
+  return conceptScore;
 }
 
 /**
@@ -149,11 +243,18 @@ export function reconcileStatementBatch(
   }
 
   // Build pattern map from historical transactions with non-empty categories
-  const descriptionCategoryMap: Array<{ normalized: string; categoryId: string; subcategoryId: string }> = [];
+  const descriptionCategoryMap: Array<{ 
+    concept: string; 
+    movement?: string; 
+    categoryId: string; 
+    subcategoryId: string; 
+  }> = [];
+
   for (const tx of existingLedger) {
     if (tx.categoryId && tx.categoryId !== 'cat_uncategorized' && tx.description) {
       descriptionCategoryMap.push({
-        normalized: normalizeDescription(tx.originalRawDescription || tx.description),
+        concept: tx.originalRawDescription || tx.description,
+        movement: tx.movement,
         categoryId: tx.categoryId,
         subcategoryId: tx.subcategoryId,
       });
@@ -181,7 +282,7 @@ export function reconcileStatementBatch(
 
     batchHashes.add(hash);
 
-    // Predict category
+    // Predict category using string-similarity comparing concept & movement
     let bestMatchCategoryId: string | undefined = undefined;
     let bestMatchSubcategoryId: string | undefined = undefined;
     let highestConfidence = 0;
@@ -190,12 +291,15 @@ export function reconcileStatementBatch(
     const normTarget = normalizeDescription(row.description);
 
     for (const pattern of descriptionCategoryMap) {
-      const score = calculateTokenSimilarity(normTarget, pattern.normalized);
+      const score = calculateTransactionSimilarity(
+        { description: row.description, movement: row.movement },
+        { description: pattern.concept, movement: pattern.movement }
+      );
       if (score > highestConfidence && score >= 0.35) {
         highestConfidence = score;
         bestMatchCategoryId = pattern.categoryId;
         bestMatchSubcategoryId = pattern.subcategoryId;
-        matchedRule = `Similaridad con "${pattern.normalized.slice(0, 25)}" (${Math.round(score * 100)}%)`;
+        matchedRule = `Similaridad con "${pattern.concept.slice(0, 25)}" (${Math.round(score * 100)}%)`;
       }
     }
 
@@ -255,21 +359,99 @@ export function reconcileStatementBatch(
 
 /**
  * Finds similar transactions in the ledger for bulk category application.
- * Compares token similarity of descriptions.
+ * Evaluates BOTH Concept and Movement using the 'string-similarity' library.
+ * Supports both object payload ({ id, description, movement }) and legacy parameter signature.
  */
 export function findSimilarTransactionsForBulkCategorization(
-  targetDescription: string,
-  targetTxId: string,
-  ledger: Transaction[],
-  threshold = 0.35
-): Transaction[] {
-  const normTarget = normalizeDescription(targetDescription);
-  if (!normTarget || normTarget.length < 3) return [];
+  target: string | { id?: string; description: string; movement?: string; type?: string; isIncome?: boolean },
+  arg2?: string | Transaction[],
+  arg3?: Transaction[] | number,
+  arg4?: number
+): Array<Transaction & { similarityScore: number }> {
+  let targetDesc = '';
+  let targetMov: string | undefined = undefined;
+  let targetTxId: string | undefined = undefined;
+  let targetType: string | undefined = undefined;
+  let targetIsIncome: boolean | undefined = undefined;
+  let ledger: Transaction[] = [];
+  let threshold = 0.45; // Meaningful closeness threshold for real similarity
 
-  return ledger.filter(tx => {
-    if (tx.id === targetTxId) return false;
-    const normOther = normalizeDescription(tx.originalRawDescription || tx.description);
-    const similarity = calculateTokenSimilarity(normTarget, normOther);
-    return similarity >= threshold;
-  });
+  if (typeof target === 'string') {
+    targetDesc = target;
+    if (typeof arg2 === 'string') targetTxId = arg2;
+    if (Array.isArray(arg3)) ledger = arg3;
+    if (typeof arg4 === 'number') threshold = arg4;
+  } else if (target && typeof target === 'object') {
+    targetDesc = target.description;
+    targetMov = target.movement;
+    targetTxId = target.id;
+    targetType = target.type;
+    targetIsIncome = target.isIncome;
+    if (Array.isArray(arg2)) ledger = arg2;
+    if (typeof arg3 === 'number') threshold = arg3;
+  }
+
+  if (!targetDesc || targetDesc.trim().length < 2 || !Array.isArray(ledger)) {
+    return [];
+  }
+
+  const results: Array<Transaction & { similarityScore: number }> = [];
+
+  for (const tx of ledger) {
+    if (targetTxId && tx.id === targetTxId) continue;
+
+    const score = calculateTransactionSimilarity(
+      { description: targetDesc, movement: targetMov, type: targetType, isIncome: targetIsIncome },
+      { description: tx.description, originalRawDescription: tx.originalRawDescription, movement: tx.movement, type: tx.type }
+    );
+
+    if (score >= threshold) {
+      results.push({
+        ...tx,
+        similarityScore: Math.round(score * 100),
+      });
+    }
+  }
+
+  return results.sort((a, b) => b.similarityScore - a.similarityScore);
+}
+
+/**
+ * Finds similar items within an imported raw CSV reconciliation batch for mass category assignment.
+ * Evaluates BOTH Concept and Movement using string-similarity.
+ */
+export function findSimilarReconciledBatchItems(
+  targetItem: { id: string; description: string; movement?: string; isIncome?: boolean },
+  batch: ReconciliationResultItem[],
+  threshold = 0.80
+): Array<{ item: ReconciliationResultItem; similarityScore: number }> {
+  if (!targetItem.description || targetItem.description.trim().length < 2) return [];
+
+  const matches: Array<{ item: ReconciliationResultItem; similarityScore: number }> = [];
+
+  for (const candidate of batch) {
+    if (candidate.id === targetItem.id) continue;
+
+    const score = calculateTransactionSimilarity(
+      { 
+        description: targetItem.description, 
+        movement: targetItem.movement, 
+        isIncome: targetItem.isIncome 
+      },
+      { 
+        description: candidate.row.description, 
+        movement: candidate.row.movement, 
+        isIncome: candidate.row.isIncome 
+      }
+    );
+
+    if (score >= threshold) {
+      matches.push({
+        item: candidate,
+        similarityScore: Math.round(score * 100),
+      });
+    }
+  }
+
+  return matches.sort((a, b) => b.similarityScore - a.similarityScore);
 }

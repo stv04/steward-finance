@@ -1,22 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { 
-  FolderTree, 
   Plus, 
   ChevronDown, 
   ChevronRight, 
-  TrendingUp, 
-  DollarSign, 
-  Tag, 
-  X,
-  Layers,
-  Trash2,
-  AlertTriangle,
-  CheckCircle2,
-  FolderPlus,
-  Palette
+  Trash2, 
+  AlertTriangle, 
+  FolderPlus, 
+  Pencil,
+  Sparkles,
+  Lock,
+  Check,
+  X
 } from 'lucide-react';
 import { ParentCategory, SubCategory, Transaction } from '../types/finance';
 import { formatEuro } from '../utils/formatters';
+import { findSimilarTransactionsForBulkCategorization } from '../utils/reconciliation';
 
 interface CategoriesViewProps {
   categories: ParentCategory[];
@@ -25,8 +23,42 @@ interface CategoriesViewProps {
   onSaveCategory?: (category: ParentCategory) => void;
   onDeleteCategory?: (categoryId: string) => void;
   onDeleteSubcategory?: (parentId: string, subcategoryId: string) => void;
-  onAssignCategoryToTransaction?: (txId: string, categoryId: string, subcategoryId: string) => void;
+  onAssignCategoryToTransaction?: (txId: string, categoryId: string, subcategoryId: string, similarTxIds?: string[]) => void;
 }
+
+// 24 distinct, vibrant, accessible colors to ensure no charts have color collisions
+const COLOR_PALETTE = [
+  '#0284c7', // Sky Blue
+  '#16a34a', // Emerald Green
+  '#d97706', // Amber Orange
+  '#7c3aed', // Vivid Violet
+  '#e11d48', // Rose Red
+  '#059669', // Mint Teal
+  '#2563eb', // Royal Blue
+  '#ca8a04', // Golden Amber
+  '#9333ea', // Deep Purple
+  '#db2777', // Hot Pink
+  '#0d9488', // Deep Teal
+  '#4f46e5', // Indigo
+  '#ea580c', // Bright Orange
+  '#c026d3', // Magenta / Fuchsia
+  '#0891b2', // Ocean Cyan
+  '#65a30d', // Fresh Lime
+  '#b45309', // Warm Ochre
+  '#475569', // Slate
+  '#be123c', // Crimson
+  '#4338ca', // Night Indigo
+  '#047857', // Forest
+  '#a21caf', // Deep Plum
+  '#b91c1c', // Rust Red
+  '#0e7490', // Deep Cyan
+];
+
+const subcategoryPalette = [
+  '#0284c7', '#16a34a', '#d97706', '#7c3aed', '#e11d48',
+  '#059669', '#2563eb', '#ca8a04', '#9333ea', '#db2777',
+  '#0d9488', '#4f46e5', '#ea580c', '#c026d3', '#0891b2'
+];
 
 export const CategoriesView: React.FC<CategoriesViewProps> = ({
   categories,
@@ -47,25 +79,78 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
     cat_ingresos: true,
   });
 
-  // Modal: Add Subcategory
-  const [newSubModalCatId, setNewSubModalCatId] = useState<string | null>(null);
-  const [newSubName, setNewSubName] = useState<string>('');
-  const [newSubHistAvg, setNewSubHistAvg] = useState<string>('50');
+  const [viewMode, setViewMode] = useState<'tree' | 'charts'>('tree');
+  const [selectedChartCategory, setSelectedChartCategory] = useState<string>('all');
 
-  // Modal: Add New Parent Category
+  // --- MAP OF USED COLORS TO PREVENT PALETTE DUPLICATION ---
+  const usedColorsMap = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    categories.forEach(c => {
+      if (c.color) {
+        map.set(c.color.toLowerCase(), { id: c.id, name: c.name });
+      }
+    });
+    return map;
+  }, [categories]);
+
+  const getFirstAvailableColor = (currentCategoryId?: string): string => {
+    for (const c of COLOR_PALETTE) {
+      const taken = usedColorsMap.get(c.toLowerCase());
+      if (!taken || (currentCategoryId && taken.id === currentCategoryId)) {
+        return c;
+      }
+    }
+    return COLOR_PALETTE[0];
+  };
+
+  // --- MODAL: ADD NEW PARENT CATEGORY ---
   const [isAddParentModalOpen, setIsAddParentModalOpen] = useState<boolean>(false);
   const [newCatName, setNewCatName] = useState<string>('');
   const [newCatType, setNewCatType] = useState<'expense' | 'income'>('expense');
   const [newCatColor, setNewCatColor] = useState<string>('#0284c7');
+  const [newCatError, setNewCatError] = useState<string>('');
 
-  const [viewMode, setViewMode] = useState<'tree' | 'charts'>('tree');
-  const [selectedChartCategory, setSelectedChartCategory] = useState<string>('all');
+  // --- MODAL: EDIT PARENT CATEGORY ---
+  const [editingCategory, setEditingCategory] = useState<ParentCategory | null>(null);
+  const [editCatName, setEditCatName] = useState<string>('');
+  const [editCatType, setEditCatType] = useState<'expense' | 'income'>('expense');
+  const [editCatColor, setEditCatColor] = useState<string>('');
+  const [editCatSubcategories, setEditCatSubcategories] = useState<SubCategory[]>([]);
+  const [editCatError, setEditCatError] = useState<string>('');
+  const [editCatNewSubName, setEditCatNewSubName] = useState<string>('');
+  const [editCatNewSubHistAvg, setEditCatNewSubHistAvg] = useState<string>('50');
 
-  const COLOR_PALETTE = [
-    '#0284c7', '#16a34a', '#d97706', '#7c3aed', '#e11d48',
-    '#059669', '#2563eb', '#ca8a04', '#9333ea', '#db2777',
-    '#0d9488', '#4f46e5', '#ea580c', '#c026d3', '#0891b2'
-  ];
+  // --- MODAL: ADD SUBCATEGORY DIRECTLY ---
+  const [newSubModalCatId, setNewSubModalCatId] = useState<string | null>(null);
+  const [newSubName, setNewSubName] = useState<string>('');
+  const [newSubHistAvg, setNewSubHistAvg] = useState<string>('50');
+
+  // --- MODAL: EDIT SUBCATEGORY DIRECTLY ---
+  const [editingSubcategory, setEditingSubcategory] = useState<{
+    parentId: string;
+    sub: SubCategory;
+  } | null>(null);
+  const [editSubName, setEditSubName] = useState<string>('');
+  const [editSubHistAvg, setEditSubHistAvg] = useState<string>('50');
+
+  // --- BULK SIMILARITY ASSIGNMENT PROMPT (string-similarity powered) ---
+  const [selectedCategoryAssignIds, setSelectedCategoryAssignIds] = useState<string[]>([]);
+  const [bulkAssignPrompt, setBulkAssignPrompt] = useState<{
+    primaryTxId: string;
+    primaryDesc: string;
+    primaryMovement?: string;
+    categoryId: string;
+    subcategoryId: string;
+    categoryLabel: string;
+    similarItems: Array<{
+      id: string;
+      date: string;
+      description: string;
+      movement?: string;
+      amount: number;
+      similarityScore: number;
+    }>;
+  } | null>(null);
 
   const toggleExpand = (catId: string) => {
     setExpandedCategories(prev => ({
@@ -93,19 +178,29 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
       .reduce((sum, tx) => sum + tx.amount, 0);
   };
 
-  const handleCreateSubcategorySubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newSubModalCatId || !newSubName.trim()) return;
-
-    onAddSubcategory(newSubModalCatId, newSubName.trim(), parseFloat(newSubHistAvg) || 50);
-    setNewSubModalCatId(null);
-    setNewSubName('');
-    setNewSubHistAvg('50');
+  // Open Add Category Modal
+  const handleOpenAddCategory = () => {
+    setNewCatName('');
+    setNewCatType('expense');
+    setNewCatColor(getFirstAvailableColor());
+    setNewCatError('');
+    setIsAddParentModalOpen(true);
   };
 
+  // Submit Add Category
   const handleCreateParentCategorySubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newCatName.trim()) return;
+    if (!newCatName.trim()) {
+      setNewCatError('Introduce un nombre para la categoría.');
+      return;
+    }
+
+    // Check if color is already in use
+    const taken = usedColorsMap.get(newCatColor.toLowerCase());
+    if (taken) {
+      setNewCatError(`El color seleccionado ya está en uso por la categoría "${taken.name}". Elige otro para no confundir los gráficos.`);
+      return;
+    }
 
     const newCatId = `cat_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const newCategory: ParentCategory = {
@@ -129,13 +224,172 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
     }
     setExpandedCategories(prev => ({ ...prev, [newCatId]: true }));
     setIsAddParentModalOpen(false);
-    setNewCatName('');
   };
 
-  const subcategoryPalette = [
-    '#0284c7', '#16a34a', '#d97706', '#7c3aed', '#e11d48',
-    '#059669', '#2563eb', '#ca8a04', '#9333ea', '#db2777'
-  ];
+  // Open Edit Category Modal
+  const handleOpenEditCategory = (cat: ParentCategory) => {
+    setEditingCategory(cat);
+    setEditCatName(cat.name);
+    setEditCatType(cat.type);
+    setEditCatColor(cat.color || getFirstAvailableColor(cat.id));
+    setEditCatSubcategories([...cat.subcategories]);
+    setEditCatError('');
+    setEditCatNewSubName('');
+    setEditCatNewSubHistAvg('50');
+  };
+
+  // Submit Edit Category
+  const handleSaveEditedCategory = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCategory) return;
+
+    if (!editCatName.trim()) {
+      setEditCatError('Introduce un nombre para la categoría.');
+      return;
+    }
+
+    // Check if color is already taken by ANOTHER category
+    const taken = usedColorsMap.get(editCatColor.toLowerCase());
+    if (taken && taken.id !== editingCategory.id) {
+      setEditCatError(`El color ya está en uso por la categoría "${taken.name}". Cada categoría debe poseer un color único para los gráficos.`);
+      return;
+    }
+
+    const updated: ParentCategory = {
+      ...editingCategory,
+      name: editCatName.trim(),
+      type: editCatType,
+      color: editCatColor,
+      subcategories: editCatSubcategories,
+    };
+
+    if (onSaveCategory) {
+      onSaveCategory(updated);
+    }
+    setEditingCategory(null);
+  };
+
+  // Add subcategory inside Edit Category modal
+  const handleAddSubcategoryInEditModal = () => {
+    if (!editCatNewSubName.trim() || !editingCategory) return;
+
+    const newSub: SubCategory = {
+      id: `sub_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      parentId: editingCategory.id,
+      name: editCatNewSubName.trim(),
+      monthlyAverageHistorical: parseFloat(editCatNewSubHistAvg) || 50,
+    };
+
+    setEditCatSubcategories(prev => [...prev, newSub]);
+    setEditCatNewSubName('');
+    setEditCatNewSubHistAvg('50');
+  };
+
+  // Remove subcategory inside Edit Category modal
+  const handleRemoveSubcategoryInEditModal = (subId: string) => {
+    setEditCatSubcategories(prev => prev.filter(s => s.id !== subId));
+  };
+
+  // Open Direct Edit Subcategory Modal
+  const handleOpenEditSubcategory = (parentId: string, sub: SubCategory) => {
+    setEditingSubcategory({ parentId, sub });
+    setEditSubName(sub.name);
+    setEditSubHistAvg(sub.monthlyAverageHistorical.toString());
+  };
+
+  // Save Direct Edit Subcategory
+  const handleSaveSubcategoryDirect = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSubcategory || !editSubName.trim()) return;
+
+    const parentCat = categories.find(c => c.id === editingSubcategory.parentId);
+    if (!parentCat) return;
+
+    const updatedCategory: ParentCategory = {
+      ...parentCat,
+      subcategories: parentCat.subcategories.map(s => {
+        if (s.id === editingSubcategory.sub.id) {
+          return {
+            ...s,
+            name: editSubName.trim(),
+            monthlyAverageHistorical: parseFloat(editSubHistAvg) || 0,
+          };
+        }
+        return s;
+      }),
+    };
+
+    if (onSaveCategory) {
+      onSaveCategory(updatedCategory);
+    }
+    setEditingSubcategory(null);
+  };
+
+  // Create Subcategory Submit (from '+' button on category)
+  const handleCreateSubcategorySubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSubModalCatId || !newSubName.trim()) return;
+
+    onAddSubcategory(newSubModalCatId, newSubName.trim(), parseFloat(newSubHistAvg) || 50);
+    setNewSubModalCatId(null);
+    setNewSubName('');
+    setNewSubHistAvg('50');
+  };
+
+  // Intelligent Category Assignment with string-similarity detection
+  const handleSelectCategoryForTransaction = (tx: Transaction, selectedValue: string) => {
+    if (!selectedValue || !onAssignCategoryToTransaction) return;
+    const [cId, sId] = selectedValue.split('::');
+    const targetCat = categories.find(c => c.id === cId);
+    const targetSub = targetCat?.subcategories.find(s => s.id === sId);
+    const label = `${targetCat?.name || 'Categoría'}${targetSub ? ` / ${targetSub.name}` : ''}`;
+
+    // Detect other uncategorized transactions with similar concept and movement using string-similarity
+    const similar = findSimilarTransactionsForBulkCategorization(
+      { id: tx.id, description: tx.description, movement: tx.movement, type: tx.type },
+      uncategorizedTransactions,
+      0.45
+    );
+
+    if (similar.length > 0) {
+      const matchIds = similar.map(s => s.id);
+      setSelectedCategoryAssignIds(matchIds);
+      setBulkAssignPrompt({
+        primaryTxId: tx.id,
+        primaryDesc: tx.description,
+        primaryMovement: tx.movement,
+        categoryId: cId,
+        subcategoryId: sId || '',
+        categoryLabel: label,
+        similarItems: similar.map(s => ({
+          id: s.id,
+          date: s.date,
+          description: s.description,
+          movement: s.movement,
+          amount: s.amount,
+          similarityScore: s.similarityScore,
+        })),
+      });
+    } else {
+      // Direct assign if no similar detected
+      onAssignCategoryToTransaction(tx.id, cId, sId || '');
+    }
+  };
+
+  const handleToggleSelectCatAssign = (id: string) => {
+    setSelectedCategoryAssignIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllCatAssign = () => {
+    if (!bulkAssignPrompt?.similarItems) return;
+    setSelectedCategoryAssignIds(bulkAssignPrompt.similarItems.map(s => s.id));
+  };
+
+  const handleDeselectAllCatAssign = () => {
+    setSelectedCategoryAssignIds([]);
+  };
 
   return (
     <div className="space-y-6">
@@ -147,7 +401,7 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
             Categorías y Subcategorías
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Estructura jerárquica conectada a base de datos y gráficas de distribución de gastos
+            Estructura jerárquica con paletas de colores exclusivas, edición completa y detección inteligente por similitud
           </p>
         </div>
 
@@ -177,7 +431,7 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
           {/* Create Parent Category Button */}
           <button
             type="button"
-            onClick={() => setIsAddParentModalOpen(true)}
+            onClick={handleOpenAddCategory}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors shadow-xs cursor-pointer"
           >
             <FolderPlus className="w-4 h-4" />
@@ -196,10 +450,10 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
               </div>
               <div>
                 <h3 className="text-sm font-bold text-amber-950">
-                  Gastos Pendientes por Categorizar: {uncategorizedTransactions.length} transacciones (${uncategorizedTotalSpending.toFixed(2)})
+                  Gastos Pendientes por Categorizar: {uncategorizedTransactions.length} transacciones ({formatEuro(uncategorizedTotalSpending)})
                 </h3>
                 <p className="text-xs text-amber-800">
-                  Estas transacciones provienen de extractos bancarios o registros rápidos sin clasificación. Asígnales categoría para mantener las métricas exactas:
+                  Asigna categorías y el motor <code>string-similarity</code> detectará automáticamente movimientos y conceptos afines para asignarlos en lote:
                 </p>
               </div>
             </div>
@@ -209,25 +463,23 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
           <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
             {uncategorizedTransactions.map(tx => (
               <div key={tx.id} className="bg-white p-3 rounded-lg border border-amber-200/80 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 truncate">
                   <span className="font-mono text-slate-500 text-[11px] whitespace-nowrap">{tx.date}</span>
-                  <span className="font-semibold text-slate-900 truncate max-w-xs">{tx.description}</span>
+                  <div className="truncate">
+                    <span className="font-semibold text-slate-900 truncate block">{tx.description}</span>
+                    {tx.movement && (
+                      <span className="text-[10px] text-slate-400 block">Mov: {tx.movement}</span>
+                    )}
+                  </div>
                   <span className="font-mono font-bold text-slate-900 whitespace-nowrap">{formatEuro(tx.amount)}</span>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <span className="text-[11px] text-slate-500 font-medium">Asignar a:</span>
                   <select
                     defaultValue=""
-                    onChange={(e) => {
-                      const selectedVal = e.target.value;
-                      if (!selectedVal) return;
-                      const [cId, sId] = selectedVal.split('::');
-                      if (onAssignCategoryToTransaction) {
-                        onAssignCategoryToTransaction(tx.id, cId, sId || '');
-                      }
-                    }}
-                    className="bg-amber-50/50 border border-amber-300 rounded px-2.5 py-1 text-xs text-slate-800 font-semibold cursor-pointer"
+                    onChange={(e) => handleSelectCategoryForTransaction(tx, e.target.value)}
+                    className="bg-amber-50/50 border border-amber-300 rounded px-2.5 py-1 text-xs text-slate-800 font-semibold cursor-pointer max-w-xs"
                   >
                     <option value="">Seleccionar categoría...</option>
                     {categories.filter(c => c.type === 'expense').map(c => (
@@ -267,9 +519,20 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                     <button className="text-slate-400 p-0.5">
                       {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                     </button>
-                    <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+                    <span 
+                      className="w-4 h-4 rounded-full shrink-0 shadow-xs ring-1 ring-black/10" 
+                      style={{ backgroundColor: cat.color }} 
+                    />
                     <div>
-                      <h3 className="text-sm font-bold text-slate-900">{cat.name}</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-bold text-slate-900">{cat.name}</h3>
+                        <span 
+                          className="px-1.5 py-0.2 rounded text-[10px] font-semibold border"
+                          style={{ borderColor: `${cat.color}40`, color: cat.color }}
+                        >
+                          Color Exclusivo
+                        </span>
+                      </div>
                       <span className="text-xs text-slate-500">
                         {cat.subcategories.length} subcategorías asociadas · {isIncome ? 'Flujo de Ingreso' : 'Centro de Costos'}
                       </span>
@@ -291,7 +554,17 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      {/* Edit Category Button */}
+                      <button
+                        onClick={() => handleOpenEditCategory(cat)}
+                        className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                        title="Modificar categoría y color"
+                      >
+                        <Pencil className="w-4 h-4 text-slate-600" />
+                      </button>
+
+                      {/* Add Subcategory Button */}
                       <button
                         onClick={() => setNewSubModalCatId(cat.id)}
                         className="p-1.5 text-slate-600 hover:text-slate-900 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
@@ -338,7 +611,7 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                               <span className="font-medium text-slate-800">{sub.name}</span>
                             </div>
 
-                            <div className="flex items-center gap-8">
+                            <div className="flex items-center gap-6">
                               <div className="text-right">
                                 <span className="text-[10px] text-slate-400 block">Consumo Mes</span>
                                 <span className="font-mono font-bold text-slate-900 tabular-nums">
@@ -362,19 +635,30 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                                 </span>
                               </div>
 
-                              {onDeleteSubcategory && (
+                              {/* Action buttons for subcategory */}
+                              <div className="flex items-center gap-1">
                                 <button
-                                  onClick={() => {
-                                    if (window.confirm(`¿Eliminar la subcategoría "${sub.name}"?`)) {
-                                      onDeleteSubcategory(cat.id, sub.id);
-                                    }
-                                  }}
-                                  className="text-slate-300 hover:text-rose-600 p-1 transition-colors cursor-pointer"
-                                  title="Eliminar subcategoría"
+                                  onClick={() => handleOpenEditSubcategory(cat.id, sub)}
+                                  className="text-slate-400 hover:text-slate-800 p-1 transition-colors cursor-pointer"
+                                  title="Editar subcategoría"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <Pencil className="w-3.5 h-3.5" />
                                 </button>
-                              )}
+
+                                {onDeleteSubcategory && (
+                                  <button
+                                    onClick={() => {
+                                      if (window.confirm(`¿Eliminar la subcategoría "${sub.name}"?`)) {
+                                        onDeleteSubcategory(cat.id, sub.id);
+                                      }
+                                    }}
+                                    className="text-slate-300 hover:text-rose-600 p-1 transition-colors cursor-pointer"
+                                    title="Eliminar subcategoría"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         );
@@ -412,7 +696,7 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                     : 'bg-white border border-slate-200 text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: cat.color }} />
+                <span className="w-2.5 h-2.5 rounded-full ring-1 ring-black/10" style={{ backgroundColor: cat.color }} />
                 <span>{cat.name}</span>
               </button>
             ))}
@@ -447,7 +731,7 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                       {/* Card Header */}
                       <div className="flex items-center justify-between pb-3 border-b border-slate-100">
                         <div className="flex items-center gap-2">
-                          <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: cat.color }} />
+                          <span className="w-3.5 h-3.5 rounded-full shrink-0 ring-1 ring-black/10" style={{ backgroundColor: cat.color }} />
                           <h3 className="text-sm font-bold text-slate-900">{cat.name}</h3>
                         </div>
                         <div className="text-right">
@@ -536,7 +820,439 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
         </div>
       )}
 
-      {/* Modal: Añadir Subcategoría */}
+      {/* --- MODAL: CREAR NUEVA CATEGORÍA PADRE (CON VALIDACIÓN DE COLOR ÚNICO) --- */}
+      {isAddParentModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <FolderPlus className="w-5 h-5 text-slate-800" />
+                <h3 className="text-sm font-bold text-slate-900">Crear Nueva Categoría</h3>
+              </div>
+              <button
+                onClick={() => setIsAddParentModalOpen(false)}
+                className="text-slate-400 hover:text-slate-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {newCatError && (
+              <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{newCatError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateParentCategorySubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Nombre de la Categoría</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. Mascotas, Educación, Negocio..."
+                  value={newCatName}
+                  onChange={(e) => {
+                    setNewCatName(e.target.value);
+                    setNewCatError('');
+                  }}
+                  className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:border-slate-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Naturaleza</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewCatType('expense')}
+                    className={`py-1.5 text-xs font-semibold rounded-lg border cursor-pointer transition-colors ${
+                      newCatType === 'expense'
+                        ? 'border-slate-900 bg-slate-900 text-white'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    Gasto / Centro Costo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewCatType('income')}
+                    className={`py-1.5 text-xs font-semibold rounded-lg border cursor-pointer transition-colors ${
+                      newCatType === 'income'
+                        ? 'border-emerald-700 bg-emerald-700 text-white'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    Ingreso / Flujo
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Color Exclusivo en Gráficos
+                  </label>
+                  <span className="text-[11px] text-slate-500">
+                    (Colores en uso bloqueados)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-8 gap-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                  {COLOR_PALETTE.map(color => {
+                    const taken = usedColorsMap.get(color.toLowerCase());
+                    const isSelected = newCatColor.toLowerCase() === color.toLowerCase();
+
+                    return (
+                      <button
+                        key={color}
+                        type="button"
+                        disabled={!!taken}
+                        onClick={() => {
+                          if (!taken) {
+                            setNewCatColor(color);
+                            setNewCatError('');
+                          }
+                        }}
+                        title={taken ? `En uso por: ${taken.name}` : `Disponible`}
+                        className={`w-7 h-7 rounded-full transition-transform flex items-center justify-center relative ${
+                          taken 
+                            ? 'opacity-25 cursor-not-allowed scale-90' 
+                            : 'cursor-pointer hover:scale-110'
+                        } ${
+                          isSelected ? 'ring-2 ring-offset-2 ring-slate-900 scale-110 shadow-sm' : ''
+                        }`}
+                        style={{ backgroundColor: color }}
+                      >
+                        {taken && (
+                          <Lock className="w-3 h-3 text-white drop-shadow-xs" />
+                        )}
+                        {isSelected && !taken && (
+                          <Check className="w-3.5 h-3.5 text-white drop-shadow-xs stroke-[3]" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1.5">
+                  Para no confundir los gráficos de barras y de tarta, no se permite seleccionar un color ya asignado a otra categoría.
+                </p>
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAddParentModalOpen(false)}
+                  className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg cursor-pointer"
+                >
+                  Crear Categoría
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL: EDITAR CATEGORÍA (NOMBRE, COLOR ÚNICO, SUBCATEGORÍAS) --- */}
+      {editingCategory && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-xl border border-slate-200 space-y-4 my-6">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <Pencil className="w-5 h-5 text-slate-800" />
+                <h3 className="text-sm font-bold text-slate-900">
+                  Modificar Categoría: {editingCategory.name}
+                </h3>
+              </div>
+              <button
+                onClick={() => setEditingCategory(null)}
+                className="text-slate-400 hover:text-slate-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {editCatError && (
+              <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+                <span>{editCatError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditedCategory} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Nombre</label>
+                <input
+                  type="text"
+                  required
+                  value={editCatName}
+                  onChange={(e) => {
+                    setEditCatName(e.target.value);
+                    setEditCatError('');
+                  }}
+                  className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:border-slate-500 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Naturaleza</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditCatType('expense')}
+                    className={`py-1.5 text-xs font-semibold rounded-lg border cursor-pointer transition-colors ${
+                      editCatType === 'expense'
+                        ? 'border-slate-900 bg-slate-900 text-white'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    Gasto / Centro Costo
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditCatType('income')}
+                    className={`py-1.5 text-xs font-semibold rounded-lg border cursor-pointer transition-colors ${
+                      editCatType === 'income'
+                        ? 'border-emerald-700 bg-emerald-700 text-white'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    Ingreso / Flujo
+                  </button>
+                </div>
+              </div>
+
+              {/* Unique Color Selection in Edit Mode */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Paleta de Color Exclusiva
+                  </label>
+                  <span className="text-[11px] text-slate-500">
+                    (Evita duplicar colores en gráficos)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-8 gap-2 p-3 bg-slate-50 rounded-lg border border-slate-200">
+                  {COLOR_PALETTE.map(color => {
+                    const taken = usedColorsMap.get(color.toLowerCase());
+                    const isTakenByAnother = taken && taken.id !== editingCategory.id;
+                    const isSelected = editCatColor.toLowerCase() === color.toLowerCase();
+
+                    return (
+                      <button
+                        key={color}
+                        type="button"
+                        disabled={isTakenByAnother}
+                        onClick={() => {
+                          if (!isTakenByAnother) {
+                            setEditCatColor(color);
+                            setEditCatError('');
+                          }
+                        }}
+                        title={
+                          isTakenByAnother 
+                            ? `Bloqueado: En uso por "${taken.name}"` 
+                            : isSelected ? 'Color actual' : 'Disponible'
+                        }
+                        className={`w-7 h-7 rounded-full transition-transform flex items-center justify-center relative ${
+                          isTakenByAnother 
+                            ? 'opacity-25 cursor-not-allowed scale-90' 
+                            : 'cursor-pointer hover:scale-110'
+                        } ${
+                          isSelected ? 'ring-2 ring-offset-2 ring-slate-900 scale-110 shadow-sm' : ''
+                        }`}
+                        style={{ backgroundColor: color }}
+                      >
+                        {isTakenByAnother && (
+                          <Lock className="w-3 h-3 text-white drop-shadow-xs" />
+                        )}
+                        {isSelected && !isTakenByAnother && (
+                          <Check className="w-3.5 h-3.5 text-white drop-shadow-xs stroke-[3]" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Los colores atenuados pertenecen a otras categorías y están bloqueados para evitar confusiones en los informes visuales.
+                </p>
+              </div>
+
+              {/* Subcategories list editor inside edit category modal */}
+              <div className="pt-2 border-t border-slate-200 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-900">
+                    Subcategorías ({editCatSubcategories.length})
+                  </label>
+                  <span className="text-[11px] text-slate-500">
+                    Gestiona nombres y presupuestos históricos
+                  </span>
+                </div>
+
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {editCatSubcategories.map((sub, idx) => (
+                    <div key={sub.id} className="p-2.5 bg-slate-50 rounded-lg border border-slate-200 flex items-center justify-between gap-3 text-xs">
+                      <div className="flex-1 space-y-1">
+                        <input
+                          type="text"
+                          value={sub.name}
+                          onChange={(e) => {
+                            const newName = e.target.value;
+                            setEditCatSubcategories(prev => prev.map((s, i) => i === idx ? { ...s, name: newName } : s));
+                          }}
+                          className="w-full px-2 py-1 text-xs border border-slate-300 rounded bg-white font-medium focus:outline-hidden focus:border-slate-500"
+                          placeholder="Nombre de subcategoría"
+                        />
+                      </div>
+                      <div className="w-28 space-y-1">
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            step="5"
+                            value={sub.monthlyAverageHistorical}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setEditCatSubcategories(prev => prev.map((s, i) => i === idx ? { ...s, monthlyAverageHistorical: val } : s));
+                            }}
+                            className="w-full px-2 py-1 text-xs font-mono border border-slate-300 rounded bg-white text-right focus:outline-hidden focus:border-slate-500"
+                            placeholder="0"
+                          />
+                          <span className="text-slate-500 text-[11px] font-mono">€</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveSubcategoryInEditModal(sub.id)}
+                        className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer transition-colors"
+                        title="Eliminar subcategoría"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Quick Add Subcategory form inside edit category modal */}
+                <div className="p-2.5 bg-slate-100/70 rounded-lg border border-dashed border-slate-300 flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Nueva subcategoría..."
+                    value={editCatNewSubName}
+                    onChange={(e) => setEditCatNewSubName(e.target.value)}
+                    className="flex-1 px-2.5 py-1 text-xs border border-slate-300 rounded-md bg-white focus:outline-hidden"
+                  />
+                  <div className="flex items-center gap-1 w-24">
+                    <input
+                      type="number"
+                      step="5"
+                      placeholder="Histórico"
+                      value={editCatNewSubHistAvg}
+                      onChange={(e) => setEditCatNewSubHistAvg(e.target.value)}
+                      className="w-full px-2 py-1 text-xs font-mono border border-slate-300 rounded-md bg-white text-right focus:outline-hidden"
+                    />
+                    <span className="text-slate-500 text-[11px]">€</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAddSubcategoryInEditModal}
+                    className="px-2.5 py-1 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-md cursor-pointer shrink-0"
+                  >
+                    Añadir
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-3 flex justify-end gap-2 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setEditingCategory(null)}
+                  className="px-3.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg cursor-pointer"
+                >
+                  Guardar Cambios
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL: EDITAR SUBCATEGORÍA DIRECTA --- */}
+      {editingSubcategory && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-slate-200 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+              <div className="flex items-center gap-2">
+                <Pencil className="w-4 h-4 text-slate-800" />
+                <h3 className="text-sm font-bold text-slate-900">Editar Subcategoría</h3>
+              </div>
+              <button
+                onClick={() => setEditingSubcategory(null)}
+                className="text-slate-400 hover:text-slate-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveSubcategoryDirect} className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Nombre</label>
+                <input
+                  type="text"
+                  required
+                  value={editSubName}
+                  onChange={(e) => setEditSubName(e.target.value)}
+                  className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:border-slate-500 font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Promedio Mensual Histórico (€ EUR)
+                </label>
+                <input
+                  type="number"
+                  step="5"
+                  required
+                  value={editSubHistAvg}
+                  onChange={(e) => setEditSubHistAvg(e.target.value)}
+                  className="w-full px-3 py-1.5 text-xs font-mono border border-slate-300 rounded-lg focus:outline-hidden focus:border-slate-500"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEditingSubcategory(null)}
+                  className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg cursor-pointer"
+                >
+                  Guardar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL: AÑADIR SUBCATEGORÍA --- */}
       {newSubModalCatId && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-slate-200 space-y-4">
@@ -575,7 +1291,7 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                 />
               </div>
 
-              <div className="pt-2 flex justify-end gap-2">
+              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={() => setNewSubModalCatId(null)}
@@ -595,94 +1311,159 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
         </div>
       )}
 
-      {/* Modal: Crear Nueva Categoría Padre */}
-      {isAddParentModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl max-w-sm w-full p-6 shadow-xl border border-slate-200 space-y-4">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-              <h3 className="text-sm font-bold text-slate-900">Crear Nueva Categoría</h3>
-              <button
-                onClick={() => setIsAddParentModalOpen(false)}
-                className="text-slate-400 hover:text-slate-700 cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
+      {/* --- MODAL: CONFIRMACIÓN INTELIGENTE DE ASIGNACIÓN MASIVA POR SIMILITUD --- */}
+      {bulkAssignPrompt && (
+        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 z-60">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
+            <div className="flex items-center gap-3 pb-3 border-b border-slate-200">
+              <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
+                <Sparkles className="w-5 h-5 text-emerald-600" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Detección de Similitud (string-similarity)
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Análisis computado por concepto y tipo de movimiento
+                </p>
+              </div>
             </div>
 
-            <form onSubmit={handleCreateParentCategorySubmit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Nombre de la Categoría</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ej. Mascotas, Educación, Negocio..."
-                  value={newCatName}
-                  onChange={(e) => setNewCatName(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:border-slate-500"
-                />
-              </div>
+            <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-700 space-y-2.5">
+              <p className="font-medium text-slate-900">
+                Se detectaron <strong>{bulkAssignPrompt.similarItems.length}</strong> transacciones adicionales coincidentes con:
+              </p>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Naturaleza</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setNewCatType('expense')}
-                    className={`py-1.5 text-xs font-semibold rounded-lg border cursor-pointer ${
-                      newCatType === 'expense'
-                        ? 'border-slate-900 bg-slate-900 text-white'
-                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    Gasto / Centro Costo
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setNewCatType('income')}
-                    className={`py-1.5 text-xs font-semibold rounded-lg border cursor-pointer ${
-                      newCatType === 'income'
-                        ? 'border-emerald-700 bg-emerald-700 text-white'
-                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
-                    }`}
-                  >
-                    Ingreso / Flujo
-                  </button>
+              <div className="bg-white p-2.5 rounded border border-slate-200 space-y-1">
+                <div className="flex items-center justify-between text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
+                  <span>Concepto base</span>
+                  {bulkAssignPrompt.primaryMovement && <span>Movimiento</span>}
+                </div>
+                <div className="flex items-center justify-between gap-2 font-mono text-slate-900 text-xs font-bold">
+                  <span className="truncate">"{bulkAssignPrompt.primaryDesc}"</span>
+                  {bulkAssignPrompt.primaryMovement && (
+                    <span className="px-1.5 py-0.5 bg-slate-100 rounded text-[11px] text-slate-700 shrink-0">
+                      {bulkAssignPrompt.primaryMovement}
+                    </span>
+                  )}
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1.5">Color Identificador</label>
-                <div className="flex flex-wrap gap-2">
-                  {COLOR_PALETTE.map(color => (
+              {/* Matching items preview with checkboxes */}
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-slate-600 font-semibold">
+                    Coincidencias encontradas ({selectedCategoryAssignIds.length}/{bulkAssignPrompt.similarItems.length} seleccionadas):
+                  </span>
+                  <div className="flex items-center gap-2">
                     <button
-                      key={color}
                       type="button"
-                      onClick={() => setNewCatColor(color)}
-                      className={`w-6 h-6 rounded-full cursor-pointer transition-transform ${
-                        newCatColor === color ? 'ring-2 ring-offset-2 ring-slate-900 scale-110' : 'hover:scale-105'
-                      }`}
-                      style={{ backgroundColor: color }}
-                    />
-                  ))}
+                      onClick={handleSelectAllCatAssign}
+                      className="text-slate-900 hover:underline font-semibold cursor-pointer"
+                    >
+                      Todas
+                    </button>
+                    <span className="text-slate-300">·</span>
+                    <button
+                      type="button"
+                      onClick={handleDeselectAllCatAssign}
+                      className="text-slate-500 hover:underline cursor-pointer"
+                    >
+                      Ninguna
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-[10px] text-slate-500">
+                  Desmarca cualquier transacción que no corresponda (falso positivo):
+                </p>
+
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {bulkAssignPrompt.similarItems.map(item => {
+                    const isChecked = selectedCategoryAssignIds.includes(item.id);
+
+                    return (
+                      <div 
+                        key={item.id} 
+                        onClick={() => handleToggleSelectCatAssign(item.id)}
+                        className={`p-2 rounded-lg border flex items-center justify-between gap-2.5 text-[11px] cursor-pointer transition-colors ${
+                          isChecked ? 'bg-slate-100/90 border-slate-300 shadow-xs' : 'bg-slate-50 border-slate-200 opacity-60'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 truncate">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => handleToggleSelectCatAssign(item.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-4 h-4 rounded text-slate-900 border-slate-300 focus:ring-slate-900 cursor-pointer shrink-0"
+                          />
+                          <div className="truncate">
+                            <span className="font-semibold text-slate-800 truncate block">{item.description}</span>
+                            <span className="text-[10px] text-slate-400 block">
+                              {item.date} {item.movement ? `· ${item.movement}` : ''}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <span className="font-mono font-bold text-slate-900 block">{formatEuro(item.amount)}</span>
+                          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded">
+                            {item.similarityScore}% cercanía
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsAddParentModalOpen(false)}
-                  className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 cursor-pointer"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg cursor-pointer"
-                >
-                  Guardar Categoría
-                </button>
-              </div>
-            </form>
+              <p className="text-slate-600 pt-1">
+                ¿Deseas clasificar las transacciones seleccionadas en <strong>"{bulkAssignPrompt.categoryLabel}"</strong>?
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => {
+                  if (onAssignCategoryToTransaction) {
+                    onAssignCategoryToTransaction(
+                      bulkAssignPrompt.primaryTxId,
+                      bulkAssignPrompt.categoryId,
+                      bulkAssignPrompt.subcategoryId
+                    );
+                  }
+                  setBulkAssignPrompt(null);
+                }}
+                className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 cursor-pointer"
+              >
+                Solo esta transacción
+              </button>
+              <button
+                type="button"
+                disabled={selectedCategoryAssignIds.length === 0}
+                onClick={() => {
+                  if (onAssignCategoryToTransaction) {
+                    onAssignCategoryToTransaction(
+                      bulkAssignPrompt.primaryTxId,
+                      bulkAssignPrompt.categoryId,
+                      bulkAssignPrompt.subcategoryId,
+                      selectedCategoryAssignIds
+                    );
+                  }
+                  setBulkAssignPrompt(null);
+                }}
+                className={`px-3.5 py-1.5 text-xs font-semibold text-white rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs ${
+                  selectedCategoryAssignIds.length > 0 
+                    ? 'bg-slate-900 hover:bg-slate-800' 
+                    : 'bg-slate-300 cursor-not-allowed'
+                }`}
+              >
+                <Check className="w-4 h-4" />
+                <span>Asignar a seleccionadas ({selectedCategoryAssignIds.length + 1})</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

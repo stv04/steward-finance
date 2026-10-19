@@ -498,11 +498,12 @@ export async function deleteTransactionFromFirestore(
 
     const accountDeltas = getAccountDeltasOnTransactionUpdate(transaction);
     for (const [accId, delta] of accountDeltas.entries()) {
-      if (delta !== 0) {
         const accRef = doc(db, 'families', familyId, 'accounts', accId);
-        const acc = (await getDoc(accRef)).data();
-        batch.set(accRef, { balance: acc.balance + delta }, { merge: true });
-      }
+        const accSnap = await getDoc(accRef);
+        if (accSnap.exists()) {
+          const acc = accSnap.data();
+          batch.set(accRef, { balance: (acc?.balance ?? 0) + delta }, { merge: true });
+        }
     }
 
     batch.commit();

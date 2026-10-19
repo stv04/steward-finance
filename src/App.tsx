@@ -424,17 +424,25 @@ function MainApp() {
   };
 
   // Categories and Subcategories Handlers (Firestore-backed)
-  const handleSaveCategory = async (newCategory: ParentCategory) => {
+  const handleSaveCategory = async (newOrUpdatedCategory: ParentCategory) => {
     if (currentUser && !isDemoMode && userProfile?.familyId) {
       try {
-        await saveCategoryToFirestore(userProfile.familyId, newCategory);
+        await saveCategoryToFirestore(userProfile.familyId, newOrUpdatedCategory);
       } catch (err) {
         console.error('Firestore save category failed:', err);
       }
       return;
     }
 
-    setCategories(prev => [...prev, newCategory]);
+    setCategories(prev => {
+      const idx = prev.findIndex(c => c.id === newOrUpdatedCategory.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = newOrUpdatedCategory;
+        return copy;
+      }
+      return [...prev, newOrUpdatedCategory];
+    });
   };
 
   const handleDeleteCategory = async (categoryId: string) => {
@@ -499,26 +507,43 @@ function MainApp() {
     setCategories(prev => prev.map(cat => cat.id === parentId ? updatedCategory : cat));
   };
 
-  const handleAssignCategoryToTransaction = async (txId: string, categoryId: string, subcategoryId: string) => {
-    const tx = transactions.find(t => t.id === txId);
-    if (!tx) return;
-
-    const updatedTx: Transaction = {
-      ...tx,
-      categoryId,
-      subcategoryId,
-    };
+  const handleAssignCategoryToTransaction = async (
+    txId: string, 
+    categoryId: string, 
+    subcategoryId: string,
+    additionalSimilarTxIds?: string[]
+  ) => {
+    const allIds = [txId, ...(additionalSimilarTxIds || [])];
 
     if (currentUser && !isDemoMode && userProfile?.familyId) {
       try {
-        await updateTransactionInFirestore(userProfile.familyId, updatedTx, tx, accounts);
+        for (const id of allIds) {
+          const tx = transactions.find(t => t.id === id);
+          if (tx) {
+            const updatedTx: Transaction = {
+              ...tx,
+              categoryId,
+              subcategoryId,
+            };
+            await updateTransactionInFirestore(userProfile.familyId, updatedTx, tx, accounts);
+          }
+        }
       } catch (err) {
         console.error('Firestore assign category failed:', err);
       }
       return;
     }
 
-    setTransactions(prev => prev.map(t => t.id === txId ? updatedTx : t));
+    setTransactions(prev => prev.map(t => {
+      if (allIds.includes(t.id)) {
+        return {
+          ...t,
+          categoryId,
+          subcategoryId,
+        };
+      }
+      return t;
+    }));
   };
 
   const handleSaveNewAccord = async (newAccord: BudgetAccord) => {
