@@ -13,9 +13,15 @@ import {
   AlertTriangle,
   ChevronLeft,
   ChevronRight,
-  RotateCcw
+  RotateCcw,
+  Users,
+  PiggyBank,
+  Coins,
+  BarChart2,
+  Info,
+  Sparkles
 } from 'lucide-react';
-import { FinancialAccount, ParentCategory, ScopeType, Transaction } from '../types/finance';
+import { FinancialAccount, ParentCategory, ScopeType, Transaction, UserProfile } from '../types/finance';
 import { formatEuro } from '../utils/formatters';
 import { 
   TimeframePeriod, 
@@ -27,6 +33,7 @@ interface DashboardOverviewProps {
   accounts: FinancialAccount[];
   transactions: Transaction[];
   categories: ParentCategory[];
+  users?: UserProfile[];
   activeScope: ScopeType;
   activeUserId: string;
   onNavigateToTransactions: () => void;
@@ -40,6 +47,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   accounts,
   transactions,
   categories,
+  users = [],
   activeScope,
   activeUserId,
   onNavigateToTransactions,
@@ -111,10 +119,12 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
     return getTimeframeRange(timeframe, currentPeriod);
   }, [timeframe, currentPeriod]);
 
-  // Filter accounts by active scope
+  const [familyChartTab, setFamilyChartTab] = useState<'comparison' | 'distribution'>('comparison');
+
+  // Filter accounts by active scope: In familiar mode, include all family accounts; in personal, active user only
   const filteredAccounts = useMemo(() => {
     if (activeScope === 'familiar') return accounts;
-    return accounts.filter(acc => acc.ownerId === activeUserId || acc.scope === 'personal');
+    return accounts.filter(acc => acc.ownerId === activeUserId);
   }, [accounts, activeScope, activeUserId]);
 
   // Aggregate asset balances and credit liabilities
@@ -151,17 +161,103 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   }, [filteredAccounts]);
 
   // Filter transactions by active scope and iterative timeframe
+  // Personal scope = only transactions of activeUserId
+  // Familiar scope = all family transactions (even if marked personal)
   const filteredTransactions = useMemo(() => {
     return transactions.filter(tx => {
-      // Scope check
-      if (activeScope === 'personal' && tx.userId !== activeUserId && tx.scope !== 'personal') {
+      if (activeScope === 'personal' && tx.userId !== activeUserId) {
         return false;
       }
-
-      // Timeframe check with date iteration
       return isDateInSelectedPeriod(tx.date, timeframe, currentPeriod);
     });
   }, [transactions, activeScope, activeUserId, timeframe, currentPeriod]);
+
+  // List of all family members detected from users list and transactions
+  const familyMembers = useMemo(() => {
+    const list = users && users.length > 0 ? [...users] : [];
+    const knownIds = new Set(list.map(u => u.id));
+    for (const tx of transactions) {
+      if (tx.userId && !knownIds.has(tx.userId)) {
+        list.push({
+          id: tx.userId,
+          name: tx.userId === 'usr_carlos' ? 'Carlos Mendoza' : tx.userId === 'usr_sofia' ? 'Sofía Rodríguez' : `Miembro (${tx.userId.replace(/^usr_/, '')})`,
+          email: `${tx.userId}@familia.internal`,
+          avatar: tx.userId === 'usr_sofia' 
+            ? 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80'
+            : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+          role: 'member'
+        });
+        knownIds.add(tx.userId);
+      }
+    }
+    return list;
+  }, [users, transactions]);
+
+  // Consolidated 4 Pillars for the Family and per Member (Ganado · Ahorrado · Invertido · Gastado)
+  const familyDynamics = useMemo(() => {
+    const periodTxs = transactions.filter(tx => isDateInSelectedPeriod(tx.date, timeframe, currentPeriod));
+
+    const memberBreakdown = familyMembers.map(member => {
+      const mTxs = periodTxs.filter(tx => tx.userId === member.id);
+
+      // 1. Ganado (Income / Earnings)
+      const earned = mTxs
+        .filter(tx => tx.type === 'income')
+        .reduce((sum, tx) => sum + tx.amount, 0);
+
+      // 2. Gastado (Ordinary living expenses excluding investment)
+      const spent = mTxs
+        .filter(tx => tx.type === 'expense' && tx.categoryId !== 'cat_inversion')
+        .reduce((sum, tx) => sum + tx.amount, 0);
+
+      // 3. Invertido (Transfers to investment accounts or category cat_inversion)
+      const invested = mTxs
+        .filter(tx => (
+          tx.categoryId === 'cat_inversion' ||
+          (tx.type === 'transfer' && accounts.find(a => a.id === tx.destinationAccountId)?.accountType === 'investment')
+        ))
+        .reduce((sum, tx) => sum + tx.amount, 0);
+
+      // 4. Ahorrado (Surplus generated from income or explicit transfer to savings account)
+      const savingsTransfers = mTxs
+        .filter(tx => tx.type === 'transfer' && accounts.find(a => a.id === tx.destinationAccountId)?.accountType === 'bank_savings')
+        .reduce((sum, tx) => sum + tx.amount, 0);
+
+      const unspentSurplus = Math.max(0, earned - spent - invested);
+      const saved = savingsTransfers > 0 ? Math.max(savingsTransfers, unspentSurplus) : unspentSurplus;
+
+      return {
+        member,
+        earned,
+        spent,
+        invested,
+        saved,
+        flowTotal: Math.max(earned, spent + invested + saved, 1)
+      };
+    });
+
+    const totalEarned = memberBreakdown.reduce((sum, m) => sum + m.earned, 0);
+    const totalSpent = memberBreakdown.reduce((sum, m) => sum + m.spent, 0);
+    const totalInvested = memberBreakdown.reduce((sum, m) => sum + m.invested, 0);
+    const totalSaved = memberBreakdown.reduce((sum, m) => sum + m.saved, 0);
+
+    const maxBarValue = Math.max(
+      ...memberBreakdown.flatMap(m => [m.earned, m.spent, m.invested, m.saved]),
+      400
+    );
+
+    return {
+      members: memberBreakdown,
+      totalEarned,
+      totalSpent,
+      totalInvested,
+      totalSaved,
+      maxBarValue,
+      savingsRate: totalEarned > 0 ? (totalSaved / totalEarned) * 100 : 0,
+      investRate: totalEarned > 0 ? (totalInvested / totalEarned) * 100 : 0,
+      spentRate: totalEarned > 0 ? (totalSpent / totalEarned) * 100 : 0,
+    };
+  }, [familyMembers, transactions, accounts, timeframe, currentPeriod]);
 
   // Calculate Income, Expense, Investment and Net Balance
   const { totalIncome, totalExpense, totalInvested, netBalance } = useMemo(() => {
@@ -521,6 +617,322 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
 
       </div>
       
+      {/* Consolidated Family Nucleus Wealth Dynamics (Ganado · Ahorrado · Invertido · Gastado) */}
+      {activeScope === 'familiar' && (
+        <section className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-6">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-50 to-blue-50 border border-blue-100 text-blue-700 flex items-center justify-center shrink-0 shadow-2xs">
+                <Users className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-slate-900">
+                    Consolidado General del Núcleo Familiar
+                  </h2>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+                    4 Pilares Patrimoniales
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Relación comparativa entre lo <strong>Ganado</strong>, <strong>Ahorrado</strong>, <strong>Invertido</strong> y <strong>Gastado</strong> por cada miembro ({activeRange.label})
+                </p>
+              </div>
+            </div>
+
+            {/* Switcher Tab */}
+            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg text-xs self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={() => setFamilyChartTab('comparison')}
+                className={`px-3 py-1 font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                  familyChartTab === 'comparison'
+                    ? 'bg-white text-slate-950 shadow-xs font-semibold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Barras Comparativas
+              </button>
+              <button
+                type="button"
+                onClick={() => setFamilyChartTab('distribution')}
+                className={`px-3 py-1 font-medium rounded transition-colors cursor-pointer whitespace-nowrap ${
+                  familyChartTab === 'distribution'
+                    ? 'bg-white text-slate-950 shadow-xs font-semibold'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Distribución % Flujo
+              </button>
+            </div>
+          </div>
+
+          {/* 4 Pillars Family Total Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {/* Ganado */}
+            <div className="p-3.5 rounded-lg border border-emerald-200 bg-emerald-50/50">
+              <div className="flex items-center justify-between text-emerald-800 text-xs font-medium mb-1">
+                <span>Ganado (Ingresos)</span>
+                <ArrowUpRight className="w-4 h-4 text-emerald-600" />
+              </div>
+              <div className="text-xl font-bold font-mono text-emerald-950">
+                {formatEuro(familyDynamics.totalEarned)}
+              </div>
+              <div className="text-[11px] text-emerald-700 mt-1">
+                100% de entradas consolidadas
+              </div>
+            </div>
+
+            {/* Ahorrado */}
+            <div className="p-3.5 rounded-lg border border-sky-200 bg-sky-50/50">
+              <div className="flex items-center justify-between text-sky-800 text-xs font-medium mb-1">
+                <span>Ahorrado (Reserva)</span>
+                <PiggyBank className="w-4 h-4 text-sky-600" />
+              </div>
+              <div className="text-xl font-bold font-mono text-sky-950">
+                {formatEuro(familyDynamics.totalSaved)}
+              </div>
+              <div className="text-[11px] text-sky-700 mt-1">
+                Tasa de ahorro: <strong>{familyDynamics.savingsRate.toFixed(1)}%</strong>
+              </div>
+            </div>
+
+            {/* Invertido */}
+            <div className="p-3.5 rounded-lg border border-violet-200 bg-violet-50/50">
+              <div className="flex items-center justify-between text-violet-800 text-xs font-medium mb-1">
+                <span>Invertido (Patrimonio)</span>
+                <TrendingUp className="w-4 h-4 text-violet-600" />
+              </div>
+              <div className="text-xl font-bold font-mono text-violet-950">
+                {formatEuro(familyDynamics.totalInvested)}
+              </div>
+              <div className="text-[11px] text-violet-700 mt-1">
+                Tasa inversión: <strong>{familyDynamics.investRate.toFixed(1)}%</strong>
+              </div>
+            </div>
+
+            {/* Gastado */}
+            <div className="p-3.5 rounded-lg border border-rose-200 bg-rose-50/50">
+              <div className="flex items-center justify-between text-rose-800 text-xs font-medium mb-1">
+                <span>Gastado (Consumo)</span>
+                <ArrowDownRight className="w-4 h-4 text-rose-600" />
+              </div>
+              <div className="text-xl font-bold font-mono text-rose-950">
+                {formatEuro(familyDynamics.totalSpent)}
+              </div>
+              <div className="text-[11px] text-rose-700 mt-1">
+                Tasa de gasto: <strong>{familyDynamics.spentRate.toFixed(1)}%</strong>
+              </div>
+            </div>
+          </div>
+
+          {/* Interactive Chart Container */}
+          <div className="p-4 bg-slate-50/70 border border-slate-200 rounded-xl">
+            {/* Chart Legend */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200 text-xs">
+              <span className="font-semibold text-slate-700">Comparativa por Miembro Familiar:</span>
+              <div className="flex flex-wrap items-center gap-4 text-xs">
+                <span className="inline-flex items-center gap-1.5 font-medium text-slate-700">
+                  <span className="w-3 h-3 rounded-xs bg-emerald-500"></span> Ganado
+                </span>
+                <span className="inline-flex items-center gap-1.5 font-medium text-slate-700">
+                  <span className="w-3 h-3 rounded-xs bg-sky-500"></span> Ahorrado
+                </span>
+                <span className="inline-flex items-center gap-1.5 font-medium text-slate-700">
+                  <span className="w-3 h-3 rounded-xs bg-violet-600"></span> Invertido
+                </span>
+                <span className="inline-flex items-center gap-1.5 font-medium text-slate-700">
+                  <span className="w-3 h-3 rounded-xs bg-rose-400"></span> Gastado
+                </span>
+              </div>
+            </div>
+
+            {/* Tab 1: Grouped Multi-Bar Comparison Chart */}
+            {familyChartTab === 'comparison' ? (
+              <div className="pt-6">
+                <div className="h-64 flex items-end justify-around gap-6 sm:gap-12 px-2 sm:px-8 border-b border-slate-200">
+                  {familyDynamics.members.map((m, idx) => {
+                    const maxVal = familyDynamics.maxBarValue;
+                    const hEarned = Math.min((m.earned / maxVal) * 100, 100);
+                    const hSaved = Math.min((m.saved / maxVal) * 100, 100);
+                    const hInvested = Math.min((m.invested / maxVal) * 100, 100);
+                    const hSpent = Math.min((m.spent / maxVal) * 100, 100);
+
+                    return (
+                      <div key={m.member.id || idx} className="flex-1 max-w-[280px] flex flex-col items-center h-full justify-end">
+                        <div className="w-full flex items-end justify-center gap-1.5 sm:gap-3 h-48">
+                          {/* Ganado Bar */}
+                          <div className="flex-1 flex flex-col items-center justify-end h-full group relative">
+                            <div 
+                              style={{ height: `${Math.max(hEarned, 3)}%` }} 
+                              className="w-full bg-emerald-500 hover:bg-emerald-600 rounded-t transition-all relative"
+                            >
+                              <span className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 text-[10px] font-mono bg-slate-900 text-white px-2 py-0.5 rounded pointer-events-none transition-opacity whitespace-nowrap z-20 shadow-md">
+                                Ganado: {formatEuro(m.earned, { maximumFractionDigits: 0 })}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Ahorrado Bar */}
+                          <div className="flex-1 flex flex-col items-center justify-end h-full group relative">
+                            <div 
+                              style={{ height: `${Math.max(hSaved, 3)}%` }} 
+                              className="w-full bg-sky-500 hover:bg-sky-600 rounded-t transition-all relative"
+                            >
+                              <span className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 text-[10px] font-mono bg-slate-900 text-white px-2 py-0.5 rounded pointer-events-none transition-opacity whitespace-nowrap z-20 shadow-md">
+                                Ahorrado: {formatEuro(m.saved, { maximumFractionDigits: 0 })}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Invertido Bar */}
+                          <div className="flex-1 flex flex-col items-center justify-end h-full group relative">
+                            <div 
+                              style={{ height: `${Math.max(hInvested, 3)}%` }} 
+                              className="w-full bg-violet-600 hover:bg-violet-700 rounded-t transition-all relative"
+                            >
+                              <span className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 text-[10px] font-mono bg-slate-900 text-white px-2 py-0.5 rounded pointer-events-none transition-opacity whitespace-nowrap z-20 shadow-md">
+                                Invertido: {formatEuro(m.invested, { maximumFractionDigits: 0 })}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Gastado Bar */}
+                          <div className="flex-1 flex flex-col items-center justify-end h-full group relative">
+                            <div 
+                              style={{ height: `${Math.max(hSpent, 3)}%` }} 
+                              className="w-full bg-rose-400 hover:bg-rose-500 rounded-t transition-all relative"
+                            >
+                              <span className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 text-[10px] font-mono bg-slate-900 text-white px-2 py-0.5 rounded pointer-events-none transition-opacity whitespace-nowrap z-20 shadow-md">
+                                Gastado: {formatEuro(m.spent, { maximumFractionDigits: 0 })}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Member Identity & Summary Footer */}
+                        <div className="flex items-center gap-2 mt-3 pt-2 text-center">
+                          <img 
+                            src={m.member.avatar} 
+                            alt={m.member.name} 
+                            className="w-6 h-6 rounded-full object-cover border border-slate-300 shrink-0" 
+                          />
+                          <div className="text-left">
+                            <span className="text-xs font-bold text-slate-900 block leading-tight">{m.member.name.split(' ')[0]}</span>
+                            <span className="text-[10px] font-mono text-emerald-700 font-semibold block leading-tight">{formatEuro(m.earned, { maximumFractionDigits: 0 })}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              /* Tab 2: Proportional Allocation Stacked Bars */
+              <div className="py-6 px-2 sm:px-6 space-y-5">
+                {familyDynamics.members.map((m, idx) => {
+                  const total = m.flowTotal;
+                  const pSpent = Math.round((m.spent / total) * 100);
+                  const pSaved = Math.round((m.saved / total) * 100);
+                  const pInvested = Math.round((m.invested / total) * 100);
+
+                  return (
+                    <div key={m.member.id || idx} className="space-y-1.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <img src={m.member.avatar} alt={m.member.name} className="w-5 h-5 rounded-full object-cover border border-slate-300" />
+                          <span className="font-bold text-slate-900">{m.member.name}</span>
+                          <span className="text-slate-400">·</span>
+                          <span className="text-[11px] text-slate-500 font-mono">Ganado: {formatEuro(m.earned)}</span>
+                        </div>
+                        <div className="text-[11px] font-mono text-slate-600">
+                          Gasto {pSpent}% · Ahorro {pSaved}% · Inversión {pInvested}%
+                        </div>
+                      </div>
+
+                      {/* Stacked Allocation Progress Bar */}
+                      <div className="w-full h-4 bg-slate-200 rounded-full overflow-hidden flex shadow-inner">
+                        <div 
+                          style={{ width: `${pSpent}%` }} 
+                          className="bg-rose-400 hover:bg-rose-500 transition-all relative group" 
+                          title={`Gastado: ${formatEuro(m.spent)} (${pSpent}%)`} 
+                        />
+                        <div 
+                          style={{ width: `${pSaved}%` }} 
+                          className="bg-sky-500 hover:bg-sky-600 transition-all relative group" 
+                          title={`Ahorrado: ${formatEuro(m.saved)} (${pSaved}%)`} 
+                        />
+                        <div 
+                          style={{ width: `${pInvested}%` }} 
+                          className="bg-violet-600 hover:bg-violet-700 transition-all relative group" 
+                          title={`Invertido: ${formatEuro(m.invested)} (${pInvested}%)`} 
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Member Detailed Cards Breakdown */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {familyDynamics.members.map(m => {
+              const incomeShare = familyDynamics.totalEarned > 0 ? (m.earned / familyDynamics.totalEarned) * 100 : 0;
+              const savingsRate = m.earned > 0 ? (m.saved / m.earned) * 100 : 0;
+              const investRate = m.earned > 0 ? (m.invested / m.earned) * 100 : 0;
+              const spentRate = m.earned > 0 ? (m.spent / m.earned) * 100 : 0;
+
+              return (
+                <div key={m.member.id} className="p-4 rounded-xl border border-slate-200 bg-white shadow-2xs space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                    <div className="flex items-center gap-2.5">
+                      <img src={m.member.avatar} alt={m.member.name} className="w-9 h-9 rounded-full object-cover border border-slate-200 shadow-2xs" />
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900 leading-tight">{m.member.name}</h4>
+                        <span className="text-[11px] text-slate-500">{m.member.role === 'admin' ? 'Administrador Familiar' : 'Miembro Cotitular'}</span>
+                      </div>
+                    </div>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                      {incomeShare.toFixed(1)}% Ingreso Familiar
+                    </span>
+                  </div>
+
+                  {/* 4 Pillars Grid for Member */}
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="p-2 rounded bg-emerald-50/60 border border-emerald-100">
+                      <div className="text-[10px] text-emerald-700 font-semibold uppercase">Ganado</div>
+                      <div className="text-sm font-mono font-bold text-emerald-950 mt-0.5">{formatEuro(m.earned)}</div>
+                    </div>
+                    <div className="p-2 rounded bg-sky-50/60 border border-sky-100">
+                      <div className="text-[10px] text-sky-700 font-semibold uppercase">Ahorrado</div>
+                      <div className="text-sm font-mono font-bold text-sky-950 mt-0.5">{formatEuro(m.saved)}</div>
+                      <div className="text-[9px] text-sky-700 font-mono mt-0.5">{savingsRate.toFixed(1)}% de sus ingresos</div>
+                    </div>
+                    <div className="p-2 rounded bg-violet-50/60 border border-violet-100">
+                      <div className="text-[10px] text-violet-700 font-semibold uppercase">Invertido</div>
+                      <div className="text-sm font-mono font-bold text-violet-950 mt-0.5">{formatEuro(m.invested)}</div>
+                      <div className="text-[9px] text-violet-700 font-mono mt-0.5">{investRate.toFixed(1)}% de sus ingresos</div>
+                    </div>
+                    <div className="p-2 rounded bg-rose-50/60 border border-rose-100">
+                      <div className="text-[10px] text-rose-700 font-semibold uppercase">Gastado</div>
+                      <div className="text-sm font-mono font-bold text-rose-950 mt-0.5">{formatEuro(m.spent)}</div>
+                      <div className="text-[9px] text-rose-700 font-mono mt-0.5">{spentRate.toFixed(1)}% de sus ingresos</div>
+                    </div>
+                  </div>
+
+                  {/* Insight Footnote */}
+                  <p className="text-[11px] text-slate-500 bg-slate-50 p-2 rounded border border-slate-100">
+                    💡 Genera un excedente de ahorro + inversión del <strong>{(savingsRate + investRate).toFixed(1)}%</strong> ({formatEuro(m.saved + m.invested)}) destinado al patrimonio del hogar.
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Pending Uncategorized Alert Banner */}
       {uncategorizedCount > 0 && (
         <div className="bg-amber-50/90 border border-amber-200/90 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shadow-xs">

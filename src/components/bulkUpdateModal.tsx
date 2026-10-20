@@ -67,7 +67,7 @@ export const BulkUpdateModal: React.FC<BulkUpdateModalProps> = ({
 
         <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-700 space-y-2.5">
             <p className="font-medium text-slate-900">
-                Se detectaron <strong>{bulkPrompt.similarItems.length}</strong> transacciones adicionales coincidentes con:
+                Se detectaron <strong>{bulkPrompt.similarItems?.length || 0}</strong> transacciones adicionales coincidentes con:
             </p>
 
             <div className="bg-white p-2.5 rounded border border-slate-200 space-y-1">

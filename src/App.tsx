@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   HashRouter, 
   Routes, 
@@ -67,10 +67,10 @@ function MainApp() {
   // Active current route path normalized (e.g. 'dashboard', 'accounts', 'transactions')
   const currentPath = location.pathname.replace(/^\//, '') || 'dashboard';
 
-  // Active scope and user state
+  // Active scope and user state (Individual / Personal by default)
   const [users] = useState<UserProfile[]>(INITIAL_USERS);
   const [activeUserId, setActiveUserId] = useState<string>('usr_carlos');
-  const [activeScope, setActiveScope] = useState<ScopeType>('familiar');
+  const [activeScope, setActiveScope] = useState<ScopeType>('personal');
 
   // Working financial datasets
   const [accounts, setAccounts] = useState<FinancialAccount[]>(INITIAL_ACCOUNTS);
@@ -109,6 +109,22 @@ function MainApp() {
       setActiveUserId('usr_carlos');
     }
   }, [userProfile]);
+
+  // Effective users list including authenticated user profile
+  const effectiveUsers = useMemo(() => {
+    if (!userProfile) return users;
+    const exists = users.some(u => u.id === userProfile.id);
+    if (!exists) {
+      return [{
+        id: userProfile.id,
+        name: userProfile.name,
+        email: userProfile.email,
+        avatar: userProfile.avatar,
+        role: (userProfile.role || 'admin') as 'admin' | 'member',
+      }, ...users];
+    }
+    return users.map(u => u.id === userProfile.id ? { ...u, name: userProfile.name, email: userProfile.email, avatar: userProfile.avatar } : u);
+  }, [users, userProfile]);
 
   const isRealUser = Boolean(currentUser && !isDemoMode && userProfile?.familyId);
   const familyId = userProfile?.familyId;
@@ -581,7 +597,7 @@ function MainApp() {
         setActiveScope={setActiveScope}
         activeUserId={activeUserId}
         setActiveUserId={setActiveUserId}
-        users={users}
+        users={effectiveUsers}
         userProfile={userProfile}
         onNewTransaction={() => {
           setTxModalInitialType('expense');
@@ -667,6 +683,7 @@ function MainApp() {
                 accounts={accounts}
                 transactions={transactions}
                 categories={categories}
+                users={effectiveUsers}
                 activeScope={activeScope}
                 activeUserId={activeUserId}
                 onNavigateToTransactions={() => navigate('/transactions')}

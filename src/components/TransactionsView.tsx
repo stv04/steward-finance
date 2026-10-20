@@ -114,8 +114,8 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   // Filtered transactions
   const filtered = useMemo(() => {
     return transactions.filter(tx => {
-      // Scope filter
-      if (activeScope === 'personal' && tx.userId !== activeUserId && tx.scope !== 'personal') {
+      // Scope filter: in personal mode, filter to the active user's transactions; in familiar mode, include all
+      if (activeScope === 'personal' && tx.userId !== activeUserId) {
         return false;
       }
 
@@ -444,6 +444,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                               </>
                             )} */}
                             <select
+                              value={tx.categoryId && tx.subcategoryId ? `${tx.categoryId}::${tx.subcategoryId}` : (tx.categoryId ? `${tx.categoryId}::` : '')}
                               onChange={(e) => {
                                 const selectedVal = e.target.value;
                                 if (!selectedVal) return;
@@ -454,13 +455,20 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                               }}
                               className="border border-slate-100 rounded w-50 px-2.5 py-1 text-xs cursor-pointer"
                             >
+                              <option value="">Sin Categoría</option>
                               {categories.map(c => (
                                 <optgroup key={c.id} label={c.name}>
-                                  {c.subcategories.map(s => (
-                                    <option key={s.id} value={`${c.id}::${s.id}`} selected={c.id === tx.categoryId && s.id === tx.subcategoryId}>
-                                      {c.name} / {s.name}
+                                  {c.subcategories.length > 0 ? (
+                                    c.subcategories.map(s => (
+                                      <option key={s.id} value={`${c.id}::${s.id}`}>
+                                        {c.name} / {s.name}
+                                      </option>
+                                    ))
+                                  ) : (
+                                    <option key={c.id} value={`${c.id}::`}>
+                                      {c.name}
                                     </option>
-                                  ))}
+                                  )}
                                 </optgroup>
                               ))}
                             </select>

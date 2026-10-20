@@ -39,7 +39,7 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
 
   const filteredAccounts = accounts.filter(acc => {
     if (activeScope === 'familiar') return true;
-    return acc.ownerId === activeUserId || acc.scope === 'personal';
+    return acc.ownerId === activeUserId;
   });
 
   // Group accounts by structural category

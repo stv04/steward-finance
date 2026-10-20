@@ -13,13 +13,13 @@ interface TransactionModalProps {
   onSave: (tx: Transaction, similarTxIdsToUpdateCategory?: string[]) => void;
   accounts: FinancialAccount[];
   categories: ParentCategory[];
-  users: UserProfile[];
+  users?: UserProfile[];
   existingTransactions?: Transaction[];
   editingTransaction?: Transaction | null;
   initialType?: TransactionType;
   initialOriginAccountId?: string;
   activeUserId: string;
-  activeScope: ScopeType;
+  activeScope?: ScopeType;
 }
 
 let outScopedDate: string | null = null;
@@ -45,8 +45,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [destinationAccountId, setDestinationAccountId] = useState<string>(accounts[1]?.id || '');
   const [categoryId, setCategoryId] = useState<string>(categories[0]?.id || '');
   const [subcategoryId, setSubcategoryId] = useState<string>(categories[0]?.subcategories[0]?.id || '');
-  const [scope, setScope] = useState<ScopeType>(activeScope);
-  const [userId, setUserId] = useState<string>(activeUserId);
   const [description, setDescription] = useState<string>('');
   const [movement, setMovement] = useState<string>('');
   const [attachmentUrl, setAttachmentUrl] = useState<string>('');
@@ -83,8 +81,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setDestinationAccountId(editingTransaction.destinationAccountId || accounts[1]?.id || '');
       setCategoryId(editingTransaction.categoryId || '');
       setSubcategoryId(editingTransaction.subcategoryId || '');
-      setScope(editingTransaction.scope);
-      setUserId(editingTransaction.userId);
       setDescription(editingTransaction.description);
       setMovement(editingTransaction.movement || '');
       setAttachmentUrl(editingTransaction.attachmentUrl || '');
@@ -99,8 +95,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setDestinationAccountId(accounts[1]?.id || '');
       setCategoryId(categories[0]?.id || '');
       setSubcategoryId(categories[0]?.subcategories[0]?.id || '');
-      setScope(activeScope);
-      setUserId(activeUserId);
       setDescription('');
       setMovement('');
       setAttachmentUrl('');
@@ -108,7 +102,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       setErrorMsg('');
       setBulkPrompt(null);
     }
-  }, [editingTransaction, isOpen, initialType, initialOriginAccountId, activeUserId, activeScope, accounts, categories]);
+  }, [editingTransaction, isOpen, initialType, initialOriginAccountId, accounts, categories]);
 
   if (!isOpen) return null;
 
@@ -155,7 +149,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
 
     const updatedTx: Transaction = {
       id: editingTransaction ? editingTransaction.id : `tx_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      userId,
+      userId: editingTransaction ? editingTransaction.userId : activeUserId,
       date: canonicalDate,
       amount: numAmount,
       type,
@@ -163,7 +157,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       destinationAccountId: type === 'transfer' ? destinationAccountId : undefined,
       categoryId,
       subcategoryId,
-      scope,
+      scope: editingTransaction ? editingTransaction.scope : 'personal',
       description: description.trim(),
       originalRawDescription: editingTransaction?.originalRawDescription || description.trim(),
       movement: movement.trim() || undefined,
@@ -363,7 +357,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:border-slate-500"
               />
               <datalist id='descriptions-datalist'>
-                {existentDescriptions.map(d => (<option value={d}></option>))}
+                {existentDescriptions.map((d, index) => (
+                  <option key={`desc-${d}-${index}`} value={d} />
+                ))}
               </datalist>
             </div>
 
@@ -381,7 +377,9 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                 className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-hidden focus:border-slate-500"
               />
               <datalist id='movements-datalist'>
-                {existentMovements.map(d => (<option value={d}></option>))}
+                {existentMovements.map((d, index) => (
+                  <option key={`mov-${d}-${index}`} value={d} />
+                ))}
               </datalist>
             </div>
 
@@ -454,36 +452,6 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   {currentCategory?.subcategories.map(sub => (
                     <option key={sub.id} value={sub.id}>
                       {sub.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Ámbito & Usuario */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Ámbito</label>
-                <select
-                  value={scope}
-                  onChange={(e) => setScope(e.target.value as ScopeType)}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:border-slate-500"
-                >
-                  <option value="familiar">Familiar (Compartido)</option>
-                  <option value="personal">Personal (Individual)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Usuario Responsable</label>
-                <select
-                  value={userId}
-                  onChange={(e) => setUserId(e.target.value)}
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:border-slate-500"
-                >
-                  {users.map(u => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
                     </option>
                   ))}
                 </select>
