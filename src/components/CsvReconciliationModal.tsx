@@ -16,6 +16,7 @@ import { FinancialAccount, ParentCategory, Transaction, UserProfile } from '../t
 import { SAMPLE_RAW_CSV_STATEMENTS } from '../data/mockData';
 import { parseRawBankCsv, reconcileStatementBatch, ReconciliationResultItem, findSimilarReconciledBatchItems } from '../utils/reconciliation';
 import { formatEuro } from '../utils/formatters';
+import { BulkUpdateModal } from './bulkUpdateModal';
 
 interface CsvReconciliationModalProps {
   isOpen: boolean;
@@ -473,138 +474,33 @@ export const CsvReconciliationModal: React.FC<CsvReconciliationModalProps> = ({
 
       {/* Modal: Sugerencia Automatizada de Categorización Similar (string-similarity + Checkboxes) */}
       {bulkPromptModal && (
-        <div className="fixed inset-0 bg-slate-950/75 backdrop-blur-xs flex items-center justify-center p-4 z-60">
-          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4">
-            <div className="flex items-center gap-3 pb-3 border-b border-slate-200">
-              <div className="w-10 h-10 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center shrink-0">
-                <Sparkles className="w-5 h-5 text-emerald-600" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-slate-900">
-                  Patrón de Similitud Detectado (Carga Masiva)
-                </h3>
-                <p className="text-xs text-slate-500">Motor string-similarity por concepto y movimiento bancario</p>
-              </div>
-            </div>
-
-            <div className="p-3.5 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-700 space-y-2.5">
-              <p className="font-medium text-slate-900">
-                Se encontraron <strong>{bulkPromptModal.similarItems.length}</strong> transacciones afines en este extracto:
-              </p>
-              
-              <div className="bg-white p-2.5 rounded border border-slate-200 space-y-1">
-                <div className="flex items-center justify-between text-[11px] text-slate-500 font-semibold uppercase tracking-wider">
-                  <span>Concepto base</span>
-                  {bulkPromptModal.targetMovement && <span>Movimiento</span>}
-                </div>
-                <div className="flex items-center justify-between gap-2 font-mono text-slate-900 text-xs font-bold">
-                  <span className="truncate">"{bulkPromptModal.targetDescription}"</span>
-                  {bulkPromptModal.targetMovement && (
-                    <span className="px-1.5 py-0.5 bg-slate-100 rounded text-[11px] text-slate-700 shrink-0">
-                      {bulkPromptModal.targetMovement}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Matching rows with individual checkboxes */}
-              <div className="space-y-1.5 pt-1">
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-slate-600 font-semibold">
-                    Coincidencias en lote ({selectedBatchItemIds.length}/{bulkPromptModal.similarItems.length} seleccionadas):
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={handleSelectAllBatchItems}
-                      className="text-emerald-700 hover:text-emerald-900 font-semibold cursor-pointer"
-                    >
-                      Todas
-                    </button>
-                    <span className="text-slate-300">·</span>
-                    <button
-                      type="button"
-                      onClick={handleDeselectAllBatchItems}
-                      className="text-slate-500 hover:text-slate-800 cursor-pointer"
-                    >
-                      Ninguna
-                    </button>
-                  </div>
-                </div>
-
-                <p className="text-[10px] text-slate-500">
-                  Desmarca cualquier transacción que no corresponda (falso positivo):
-                </p>
-
-                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                  {bulkPromptModal.similarItems.map(item => {
-                    const isChecked = selectedBatchItemIds.includes(item.id);
-
-                    return (
-                      <div 
-                        key={item.id} 
-                        onClick={() => handleToggleSelectBatchItem(item.id)}
-                        className={`p-2 rounded-lg border flex items-center justify-between gap-2.5 text-[11px] cursor-pointer transition-colors ${
-                          isChecked ? 'bg-emerald-50/70 border-emerald-300 shadow-xs' : 'bg-slate-50/60 border-slate-200 opacity-60'
-                        }`}
-                      >
-                        <div className="flex items-center gap-2.5 truncate">
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => handleToggleSelectBatchItem(item.id)}
-                            onClick={(e) => e.stopPropagation()}
-                            className="w-4 h-4 rounded text-emerald-600 border-slate-300 focus:ring-emerald-500 cursor-pointer shrink-0"
-                          />
-                          <div className="truncate">
-                            <span className="font-semibold text-slate-900 truncate block">{item.description}</span>
-                            <span className="text-[10px] text-slate-500 block">
-                              {item.date} {item.movement ? `· ${item.movement}` : ''}
-                            </span>
-                          </div>
-                        </div>
-
-                        <div className="text-right shrink-0">
-                          <span className="font-mono font-bold text-slate-900 block">{formatEuro(item.amount)}</span>
-                          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-100/70 px-1.5 py-0.2 rounded">
-                            {item.similarityScore}% cercanía
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <p className="text-slate-600 pt-1">
-                ¿Deseas clasificar las transacciones seleccionadas en <strong>"{bulkPromptModal.categoryLabel}"</strong>?
-              </p>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setBulkPromptModal(null)}
-                className="px-3.5 py-2 text-xs font-medium text-slate-600 hover:text-slate-900 cursor-pointer"
-              >
-                Solo esta transacción
-              </button>
-              <button
-                type="button"
-                disabled={selectedBatchItemIds.length === 0}
-                onClick={handleApplyBulkCategorization}
-                className={`px-4 py-2 text-xs font-semibold text-white rounded-lg transition-colors shadow-xs flex items-center gap-1.5 ${
-                  selectedBatchItemIds.length > 0 
-                    ? 'bg-emerald-700 hover:bg-emerald-800 cursor-pointer' 
-                    : 'bg-slate-300 cursor-not-allowed'
-                }`}
-              >
-                <Check className="w-4 h-4" />
-                <span>Actualizar seleccionadas ({selectedBatchItemIds.length})</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        <BulkUpdateModal
+          isOpen={true}
+          onClose={() => setBulkPromptModal(null)}
+          onSelectAll={handleSelectAllBatchItems}
+          onDeselectAll={handleDeselectAllBatchItems}
+          onToggleSelect={handleToggleSelectBatchItem}
+          onApplySingleSelect={() => {
+            // No additional action needed; primary item already updated
+            setBulkPromptModal(null);
+          }}
+          onAppySimilarSelect={handleApplyBulkCategorization}
+          bulkPrompt={{
+            targetDescription: bulkPromptModal.targetDescription,
+            targetMovement: bulkPromptModal.targetMovement,
+            categoryLabel: bulkPromptModal.categoryLabel,
+            subCategoryLabel: '',
+            similarItems: bulkPromptModal.similarItems.map(item => ({
+              id: item.id,
+              date: item.date,
+              description: item.description,
+              movement: item.movement,
+              amount: item.amount,
+              similarityScore: item.similarityScore,
+            })),
+          }}
+          selectedSimilarTxIds={selectedBatchItemIds}
+        />
       )}
 
     </div>

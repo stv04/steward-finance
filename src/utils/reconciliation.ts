@@ -295,7 +295,7 @@ export function reconcileStatementBatch(
         { description: row.description, movement: row.movement },
         { description: pattern.concept, movement: pattern.movement }
       );
-      if (score > highestConfidence && score >= 0.35) {
+      if (score > highestConfidence && score >= 0.70) {
         highestConfidence = score;
         bestMatchCategoryId = pattern.categoryId;
         bestMatchSubcategoryId = pattern.subcategoryId;
@@ -374,7 +374,7 @@ export function findSimilarTransactionsForBulkCategorization(
   let targetType: string | undefined = undefined;
   let targetIsIncome: boolean | undefined = undefined;
   let ledger: Transaction[] = [];
-  let threshold = 0.45; // Meaningful closeness threshold for real similarity
+  let threshold = 0.80; // Meaningful closeness threshold for real similarity
 
   if (typeof target === 'string') {
     targetDesc = target;
