@@ -18,6 +18,8 @@ import {
 import { FinancialAccount, ParentCategory, ScopeType, Transaction, UserProfile } from '../types/finance';
 import { formatEuro } from '../utils/formatters';
 import { TimeframePeriod, getTimeframeRange, isDateInSelectedPeriod } from '../utils/dateUtils';
+import { sortCategories } from '../utils/categoryRanking';
+import { useLanguage } from '../context/LanguageContext';
 
 interface TransactionsViewProps {
   transactions: Transaction[];
@@ -47,6 +49,10 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   onAssignCategoryToTransaction
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
+  const { t } = useLanguage();
+  const sortedCategories = useMemo(() => {
+    return sortCategories(categories, transactions, 'frequency');
+  }, [categories, transactions]);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedAccount, setSelectedAccount] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
@@ -258,7 +264,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
           >
             <option value="all">Todas las categorías</option>
             <option value="uncategorized">⚠️ Sin categorizar (Pendientes)</option>
-            {categories.map(cat => (
+            {sortedCategories.map(cat => (
               <option key={cat.id} value={cat.id}>
                 {cat.name}
               </option>
@@ -456,7 +462,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                               className="border border-slate-100 rounded w-50 px-2.5 py-1 text-xs cursor-pointer"
                             >
                               <option value="">Sin Categoría</option>
-                              {categories.map(c => (
+                              {sortedCategories.map(c => (
                                 <optgroup key={c.id} label={c.name}>
                                   {c.subcategories.length > 0 ? (
                                     c.subcategories.map(s => (

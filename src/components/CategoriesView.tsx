@@ -16,6 +16,25 @@ import { ParentCategory, SubCategory, Transaction } from '../types/finance';
 import { formatEuro } from '../utils/formatters';
 import { findSimilarTransactionsForBulkCategorization } from '../utils/reconciliation';
 import { BulkUpdateModal } from './bulkUpdateModal';
+import { 
+  ArrowUp, 
+  ArrowDown, 
+  Star, 
+  ArrowUpDown, 
+  Flame, 
+  BarChart3 
+} from 'lucide-react';
+import { 
+  CategorySortMode, 
+  computeCategoryUsageStats, 
+  sortCategories, 
+  getSavedCategorySortMode, 
+  saveCategorySortMode, 
+  moveCategoryInOrder, 
+  pinCategoryToTop, 
+  getSavedCategoryOrder 
+} from '../utils/categoryRanking';
+import { useLanguage } from '../context/LanguageContext';
 
 interface CategoriesViewProps {
   categories: ParentCategory[];
@@ -71,6 +90,40 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
   onAssignCategoryToTransaction,
 }) => {
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
+  const { t, language } = useLanguage();
+  const [sortMode, setSortMode] = useState<CategorySortMode>(() => getSavedCategorySortMode());
+  const [customOrderIds, setCustomOrderIds] = useState<string[]>(() => getSavedCategoryOrder());
+
+  const usageStats = useMemo(() => {
+    return computeCategoryUsageStats(categories, transactions);
+  }, [categories, transactions]);
+
+  const sortedCategories = useMemo(() => {
+    return sortCategories(categories, transactions, sortMode, customOrderIds);
+  }, [categories, transactions, sortMode, customOrderIds]);
+
+  const handleSortModeChange = (mode: CategorySortMode) => {
+    setSortMode(mode);
+    saveCategorySortMode(mode);
+  };
+
+  const handleMovePriority = (catId: string, direction: 'up' | 'down', e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newOrder = moveCategoryInOrder(categories, customOrderIds, catId, direction);
+    setCustomOrderIds(newOrder);
+    if (sortMode !== 'manual') {
+      handleSortModeChange('manual');
+    }
+  };
+
+  const handlePinToTop = (catId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newOrder = pinCategoryToTop(categories, customOrderIds, catId);
+    setCustomOrderIds(newOrder);
+    if (sortMode !== 'manual') {
+      handleSortModeChange('manual');
+    }
+  };
 
   const [viewMode, setViewMode] = useState<'tree' | 'charts'>('tree');
   const [selectedChartCategory, setSelectedChartCategory] = useState<string>('all');
@@ -475,7 +528,7 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                     className="bg-amber-50/50 border border-amber-300 rounded px-2.5 py-1 text-xs text-slate-800 font-semibold cursor-pointer max-w-xs"
                   >
                     <option value="">Seleccionar categoría...</option>
-                    {categories.filter(c => c.type === 'expense').map(c => (
+                    {sortedCategories.filter(c => c.type === 'expense').map(c => (
                       <optgroup key={c.id} label={c.name}>
                         {c.subcategories.map(s => (
                           <option key={s.id} value={`${c.id}::${s.id}`}>
@@ -492,10 +545,93 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
         </div>
       )}
 
+      {/* Category Ranking & Sorting Toolbar */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <span className="p-2 bg-blue-50 text-blue-700 rounded-lg shrink-0">
+            <ArrowUpDown className="w-4 h-4" />
+          </span>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold text-slate-900">
+                {t.categories.sorting.label}
+              </span>
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+                {sortMode === "frequency" && "⭐ Más Usadas en Transacciones"}
+                {sortMode === "manual" && "Prioridad Personalizada"}
+                {sortMode === "expense" && "Mayor Volumen de Gasto"}
+                {sortMode === "alphabetical" && "Alfabético (A - Z)"}
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              {sortMode === "frequency" && "Las categorías con mayor número de transacciones aparecen al primer nivel para agilizar el registro."}
+              {sortMode === "manual" && "Reordena tus categorías prioritarias usando los botones ▲ ▼ o ⭐ Fijar al inicio."}
+              {sortMode === "expense" && "Ordenadas por volumen total de gasto acumulado."}
+              {sortMode === "alphabetical" && "Orden alfabético simple de la A a la Z."}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+          <button
+            type="button"
+            onClick={() => handleSortModeChange("frequency")}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              sortMode === "frequency"
+                ? "bg-slate-900 text-white shadow-2xs"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+            title="Ordenar por frecuencia de uso en transacciones"
+          >
+            <Flame className="w-3.5 h-3.5 text-amber-400" />
+            <span>{t.categories.sorting.frequency}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSortModeChange("manual")}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              sortMode === "manual"
+                ? "bg-slate-900 text-white shadow-2xs"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+            title="Ajustar orden y prioridad manual"
+          >
+            <Star className="w-3.5 h-3.5 text-yellow-400" />
+            <span>{t.categories.sorting.manual}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSortModeChange("expense")}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              sortMode === "expense"
+                ? "bg-slate-900 text-white shadow-2xs"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>{t.categories.sorting.expense}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSortModeChange("alphabetical")}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              sortMode === "alphabetical"
+                ? "bg-slate-900 text-white shadow-2xs"
+                : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+            }`}
+          >
+            <span>{t.categories.sorting.alpha}</span>
+          </button>
+        </div>
+      </div>
+
       {/* Mode 1: Categories Tree Grid */}
       {viewMode === 'tree' ? (
         <div className="space-y-4">
-          {categories.map(cat => {
+          {sortedCategories.map((cat, catIndex) => {
             const isExpanded = !!expandedCategories[cat.id];
             const monthTotal = getParentMonthSpending(cat.id);
             const historicalTotal = cat.subcategories.reduce((sum, s) => sum + s.monthlyAverageHistorical, 0);
@@ -517,13 +653,20 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                       style={{ backgroundColor: cat.color }} 
                     />
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-200/80 text-slate-700">
+                          #{catIndex + 1}
+                        </span>
                         <h3 className="text-sm font-bold text-slate-900">{cat.name}</h3>
                         <span 
                           className="px-1.5 py-0.2 rounded text-[10px] font-semibold border"
                           style={{ borderColor: `${cat.color}40`, color: cat.color }}
                         >
                           Color Exclusivo
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200/60 inline-flex items-center gap-1">
+                          <Flame className="w-3 h-3 text-amber-500" />
+                          <span>{usageStats[cat.id]?.transactionCount || 0} {t.categories.txCount}</span>
                         </span>
                       </div>
                       <span className="text-xs text-slate-500">
@@ -548,6 +691,34 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                     </div>
 
                     <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      {/* Priority & Reorder Controls */}
+                      <button
+                        type="button"
+                        onClick={(e) => handlePinToTop(cat.id, e)}
+                        className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                        title={t.categories.pinTop || "Fijar al inicio como #1"}
+                      >
+                        <Star className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleMovePriority(cat.id, "up", e)}
+                        disabled={catIndex === 0}
+                        className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer disabled:opacity-30 disabled:pointer-events-none"
+                        title={t.categories.moveUp || "Subir prioridad"}
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => handleMovePriority(cat.id, "down", e)}
+                        disabled={catIndex === sortedCategories.length - 1}
+                        className="p-1.5 text-slate-400 hover:text-slate-900 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer disabled:opacity-30 disabled:pointer-events-none"
+                        title={t.categories.moveDown || "Bajar prioridad"}
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+
                       {/* Edit Category Button */}
                       <button
                         onClick={() => handleOpenEditCategory(cat)}

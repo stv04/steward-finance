@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Paperclip, ArrowRight, Check, Sparkles, AlertCircle } from 'lucide-react';
 import { FinancialAccount, ParentCategory, ScopeType, Transaction, TransactionType, UserProfile } from '../types/finance';
 import { computeSyncTransactionHash } from '../utils/crypto';
+import { sortCategories } from '../utils/categoryRanking';
 import { findSimilarTransactionsForBulkCategorization } from '../utils/reconciliation';
 import { normalizeAndValidateDate } from '../utils/dateUtils';
 import { formatEuro } from '../utils/formatters';
@@ -50,6 +51,10 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [attachmentUrl, setAttachmentUrl] = useState<string>('');
   const [attachmentName, setAttachmentName] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
+
+  const sortedCategories = React.useMemo(() => {
+    return sortCategories(categories, existingTransactions, 'frequency');
+  }, [categories, existingTransactions]);
 
   const existentDescriptions = Array.from(new Set(existingTransactions.map(t => t.description).filter(Boolean)));
   const existentMovements = Array.from(new Set(existingTransactions.map(t => t.movement).filter(Boolean)));
@@ -432,7 +437,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
                   className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:outline-hidden focus:border-slate-500"
                 >
                   <option value="">⚠️ Sin categorizar (Pendiente)</option>
-                  {categories.map(cat => (
+                  {sortedCategories.map(cat => (
                     <option key={cat.id} value={cat.id}>
                       {cat.name}
                     </option>

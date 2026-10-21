@@ -8,6 +8,7 @@ import {
   Plus
 } from 'lucide-react';
 import { AccountType, FinancialAccount, ScopeType } from '../types/finance';
+import { useLanguage } from '../context/LanguageContext';
 import { 
   BankAccountCard, 
   InvestmentAccountCard, 
@@ -34,6 +35,7 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
   onOpenNewAccountModal,
   onDeleteAccount,
 }) => {
+  const { t, language } = useLanguage();
   const [editingAccountId, setEditingAccountId] = useState<string | null>(null);
   const [editBalanceValue, setEditBalanceValue] = useState<string>('');
 
@@ -67,7 +69,7 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-slate-200">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-slate-900">
-            Estructura de Cuentas y Entidades Financieras
+            {t.accounts.title}
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
             Consolidación multicuenta personalizada: Bancos · Inversiones · Tarjetas · Pasarelas · Billeteras operativas
@@ -81,7 +83,7 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
             className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg transition-colors shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <ArrowLeftRight className="w-3.5 h-3.5 text-blue-600" />
-            <span>Transferir entre Cuentas</span>
+            <span>{t.accounts.transfer}</span>
           </button>
 
           <button
@@ -89,7 +91,7 @@ export const AccountsView: React.FC<AccountsViewProps> = ({
             className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors shadow-xs cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>Nueva Cuenta</span>
+            <span>{t.accounts.newAccount}</span>
           </button>
         </div>
       </div>

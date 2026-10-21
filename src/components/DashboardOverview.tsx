@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { FinancialAccount, ParentCategory, ScopeType, Transaction, UserProfile } from '../types/finance';
 import { formatEuro } from '../utils/formatters';
+import { useLanguage } from '../context/LanguageContext';
 import { 
   TimeframePeriod, 
   getTimeframeRange, 
@@ -54,6 +55,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   onNavigateToAccounts,
   onNavigateToBudgets,
 }) => {
+  const { t, language } = useLanguage();
   const [timeframe, setTimeframe] = useState<TimeframeType>('monthly');
   const [currentPeriod, setCurrentPeriod] = useState<TimeframePeriod>({
     year: 2026,
@@ -677,7 +679,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             {/* Ganado */}
             <div className="p-3.5 rounded-lg border border-emerald-200 bg-emerald-50/50">
               <div className="flex items-center justify-between text-emerald-800 text-xs font-medium mb-1">
-                <span>Ganado (Ingresos)</span>
+                <span>{t.pillars.earned} ({language === 'en' ? 'Income' : 'Ingresos'})</span>
                 <ArrowUpRight className="w-4 h-4 text-emerald-600" />
               </div>
               <div className="text-xl font-bold font-mono text-emerald-950">
@@ -691,7 +693,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             {/* Ahorrado */}
             <div className="p-3.5 rounded-lg border border-sky-200 bg-sky-50/50">
               <div className="flex items-center justify-between text-sky-800 text-xs font-medium mb-1">
-                <span>Ahorrado (Reserva)</span>
+                <span>{t.pillars.saved} ({language === 'en' ? 'Reserve' : 'Reserva'})</span>
                 <PiggyBank className="w-4 h-4 text-sky-600" />
               </div>
               <div className="text-xl font-bold font-mono text-sky-950">
@@ -705,7 +707,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             {/* Invertido */}
             <div className="p-3.5 rounded-lg border border-violet-200 bg-violet-50/50">
               <div className="flex items-center justify-between text-violet-800 text-xs font-medium mb-1">
-                <span>Invertido (Patrimonio)</span>
+                <span>{t.pillars.invested} ({language === 'en' ? 'Assets' : 'Patrimonio'})</span>
                 <TrendingUp className="w-4 h-4 text-violet-600" />
               </div>
               <div className="text-xl font-bold font-mono text-violet-950">
@@ -719,7 +721,7 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
             {/* Gastado */}
             <div className="p-3.5 rounded-lg border border-rose-200 bg-rose-50/50">
               <div className="flex items-center justify-between text-rose-800 text-xs font-medium mb-1">
-                <span>Gastado (Consumo)</span>
+                <span>{t.pillars.spent} ({language === 'en' ? 'Lifestyle' : 'Consumo'})</span>
                 <ArrowDownRight className="w-4 h-4 text-rose-600" />
               </div>
               <div className="text-xl font-bold font-mono text-rose-950">

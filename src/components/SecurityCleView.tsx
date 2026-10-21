@@ -10,9 +10,18 @@ import {
   FileCode, 
   Layers, 
   Server,
-  ArrowRight
+  ArrowRight,
+  ToggleLeft,
+  ToggleRight,
+  AlertCircle,
+  Info,
+  Sparkles,
+  Sliders,
+  CheckCircle2
 } from 'lucide-react';
 import { encryptField, EncryptedFieldEnvelope } from '../utils/crypto';
+import { SECURITY_CONFIG } from '../config/securityConfig';
+import { useLanguage } from '../context/LanguageContext';
 
 export const SecurityCleView: React.FC = () => {
   const [copiedDdl, setCopiedDdl] = useState<boolean>(false);
@@ -225,6 +234,155 @@ CREATE INDEX idx_budget_accords_month ON budget_accords(effective_month DESC);
         </div>
 
       </div>
+
+      {/* STRATEGIC GUIDE: WHAT TO HASH VS WHAT TO ENCRYPT VS CONVENTIONAL STORAGE */}
+      <section className="bg-white rounded-xl border border-slate-200 shadow-xs p-6 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 bg-blue-50 text-blue-700 rounded-lg">
+                <Sliders className="w-4 h-4" />
+              </span>
+              <h2 className="text-base font-bold text-slate-900">
+                Estrategia de Datos: Hashing vs. Cifrado vs. Modo Convencional
+              </h2>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Guía técnica para comercialización de la plataforma (SaaS/On-Premise) y control de flags en producción
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-200 text-xs">
+            <span className="text-slate-600 font-medium">Flag en código:</span>
+            <code className="bg-white px-2 py-0.5 rounded border border-slate-200 text-blue-700 font-mono font-semibold">
+              enableClientLevelEncryption: {SECURITY_CONFIG.enableClientLevelEncryption ? 'true' : 'false'}
+            </code>
+          </div>
+        </div>
+
+        {/* 3 Categories of Data in the App */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/40 space-y-2">
+            <div className="flex items-center gap-1.5 text-emerald-800 font-bold text-xs">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>1. Hasheado (SHA-256 Unidireccional)</span>
+            </div>
+            <p className="text-xs text-slate-700 leading-relaxed">
+              <strong>Qué datos:</strong> Firmas compuestas de transacciones (<code className="text-[11px] bg-white px-1 py-0.5 rounded">date|amount|desc|accId</code>) y contraseñas de acceso (scrypt por Firebase Auth).
+            </p>
+            <div className="text-[11px] text-emerald-900 font-medium pt-1 border-t border-emerald-200/60">
+              ✓ Inmutable y matemáticamente irreversible. Ideal para detectar duplicados bancarios e integridad contable sin revelar datos.
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl border border-purple-200 bg-purple-50/40 space-y-2">
+            <div className="flex items-center gap-1.5 text-purple-800 font-bold text-xs">
+              <Key className="w-4 h-4" />
+              <span>2. Cifrado Reversible (AES-256-GCM)</span>
+            </div>
+            <p className="text-xs text-slate-700 leading-relaxed">
+              <strong>Qué datos:</strong> Números de cuenta bancaria reales (IBANs, números de tarjeta, credenciales de pasarelas).
+            </p>
+            <div className="text-[11px] text-purple-900 font-medium pt-1 border-t border-purple-200/60">
+              ✓ Se cifra en el navegador antes de subirlo. Solo el usuario con la clave puede descifrarlo para consultarlo en pantalla.
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl border border-blue-200 bg-blue-50/40 space-y-2">
+            <div className="flex items-center gap-1.5 text-blue-800 font-bold text-xs">
+              <Database className="w-4 h-4" />
+              <span>3. Datos Convencionales (Sin Hashear)</span>
+            </div>
+            <p className="text-xs text-slate-700 leading-relaxed">
+              <strong>Qué datos:</strong> Montos (€ EUR), fechas, descripciones, categorías y presupuestos.
+            </p>
+            <div className="text-[11px] text-blue-900 font-medium pt-1 border-t border-blue-200/60">
+              ✓ <em>¿Por qué no hashearlos?</em> Porque el motor financiero debe sumar totales, graficar evoluciones y ordenar categorías. Se protegen con <strong>Reglas de Firestore por Núcleo Familiar</strong>.
+            </div>
+          </div>
+        </div>
+
+        {/* PROS & CONS DECISION TABLE */}
+        <div className="border border-slate-200 rounded-xl overflow-hidden">
+          <div className="bg-slate-50 px-4 py-2.5 border-b border-slate-200 flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-800">
+              Matriz Comparativa: Modo Convencional vs. Modo Cifrado Cliente (CLE)
+            </span>
+            <span className="text-[11px] text-slate-500">
+              Archivo de configuración: <code className="font-mono text-slate-700">src/config/securityConfig.ts</code>
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-200 text-xs">
+            {/* Column 1: Conventional Mode */}
+            <div className="p-4 space-y-3 bg-white">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-900 text-sm">Modo Convencional (Por Defecto)</span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">
+                  Recomendado para Producción Fácil
+                </span>
+              </div>
+              <p className="text-slate-600">
+                Almacena los datos en Firebase Firestore con aislamiento estricto por <code className="font-mono">familyId</code> y enmascaramiento visual de cuentas (<code className="font-mono">•••• 4821</code>).
+              </p>
+              <div className="space-y-1.5 pt-1">
+                <div className="text-emerald-700 flex items-start gap-1.5 font-medium">
+                  <span className="font-bold">✓</span>
+                  <span>Cero costo o complejidad de KMS; alta velocidad en queries e índices nativos.</span>
+                </div>
+                <div className="text-emerald-700 flex items-start gap-1.5 font-medium">
+                  <span className="font-bold">✓</span>
+                  <span>No hay riesgo de que un usuario pierda sus datos por extravío de una contraseña criptográfica local.</span>
+                </div>
+                <div className="text-rose-600 flex items-start gap-1.5">
+                  <span className="font-bold">✗</span>
+                  <span>El administrador de la base de datos de Google Cloud podría ver los registros si accede directamente a la consola.</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Column 2: CLE Mode */}
+            <div className="p-4 space-y-3 bg-white">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-900 text-sm">Modo Cifrado Cliente (CLE AES-256)</span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-100 text-purple-800">
+                  Para Clientes Corporativos / SaaS
+                </span>
+              </div>
+              <p className="text-slate-600">
+                Aplica cifrado simétrico AES-256-GCM en el navegador antes de enviar los datos al servidor. Ni Google ni DBAs pueden ver los números.
+              </p>
+              <div className="space-y-1.5 pt-1">
+                <div className="text-purple-700 flex items-start gap-1.5 font-medium">
+                  <span className="font-bold">✓</span>
+                  <span>Privacidad Zero-Knowledge: Ideal si deseas vender o alquilar el software como solución bancaria ultra-segura.</span>
+                </div>
+                <div className="text-purple-700 flex items-start gap-1.5 font-medium">
+                  <span className="font-bold">✓</span>
+                  <span>Cumplimiento estricto con normativas financieras internacionales de custodia de datos.</span>
+                </div>
+                <div className="text-rose-600 flex items-start gap-1.5">
+                  <span className="font-bold">✗</span>
+                  <span>Mayor complejidad: requiere gestionar custodia de llaves de recuperación o un servicio de KMS.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Quick instructions for changing the flag */}
+          <div className="bg-slate-900 text-slate-300 p-4 font-mono text-[11px] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-emerald-400 font-bold">// Para cambiar el comportamiento en producción:</span>
+              <p className="text-slate-400 mt-0.5">
+                Edita <span className="text-white">src/config/securityConfig.ts</span> y ajusta <span className="text-yellow-400">enableClientLevelEncryption: true/false</span>. La app se adapta automáticamente.
+              </p>
+            </div>
+            <span className="px-2.5 py-1 bg-slate-800 text-white rounded border border-slate-700 font-semibold whitespace-nowrap">
+              Config Flag Centralizado
+            </span>
+          </div>
+        </div>
+      </section>
 
       {/* Interactive CLE Simulator Sandbox */}
       <section className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs space-y-4">

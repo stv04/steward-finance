@@ -26,6 +26,7 @@ import {
   FamilyInfo
 } from './types/finance';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { LanguageProvider, useLanguage } from './context/LanguageContext';
 import { testFirestoreConnection } from './lib/firebase';
 import { 
   subscribeToFamilyAccounts, 
@@ -65,6 +66,7 @@ import { Cloud, Sparkles, Activity, Plus, ArrowRight } from 'lucide-react';
 
 function MainApp() {
   const { userProfile, currentUser, isDemoMode } = useAuth();
+  const { t } = useLanguage();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -668,16 +670,16 @@ function MainApp() {
           <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
-              <span className="font-semibold text-slate-200">Modo Presentación Activo:</span>
+              <span className="font-semibold text-slate-200">{t.nav.demoMode}:</span>
               <span className="text-slate-300">
-                Visualizando estructura mockup con datos financieros de muestra.
+                {t.nav.presentationBanner}
               </span>
             </div>
             <button
               onClick={() => setIsAuthModalOpen(true)}
               className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded transition-colors cursor-pointer"
             >
-              <span>Conectar Bóveda Firebase en Vivo</span>
+              <span>{t.nav.connectCloud}</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
@@ -722,7 +724,7 @@ function MainApp() {
       )}
 
       {/* Main Content Workspace Canvas with react-router-dom Routes */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 pb-32 lg:pb-12">
         <Routes>
           <Route 
             path="/" 
@@ -910,7 +912,7 @@ function MainApp() {
       />
 
       {/* Quiet, minimalist footer */}
-      <footer className="border-t border-slate-200 bg-white py-4 mt-auto">
+      <footer className="border-t border-slate-200 bg-white py-4 mt-auto mb-16 lg:mb-0">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
           <div className="flex items-center gap-2">
             <span>Plataforma de Gestión Financiera Familiar &amp; Personal</span>
@@ -936,10 +938,12 @@ function MainApp() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <HashRouter>
-        <MainApp />
-      </HashRouter>
-    </AuthProvider>
+    <LanguageProvider>
+      <AuthProvider>
+        <HashRouter>
+          <MainApp />
+        </HashRouter>
+      </AuthProvider>
+    </LanguageProvider>
   );
 }
