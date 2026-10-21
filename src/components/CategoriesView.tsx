@@ -451,9 +451,9 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex-wrap items-center gap-3">
           {/* View Mode Toggle */}
-          <div className="inline-flex p-1 bg-slate-200/70 rounded-lg text-xs">
+          <div className="my-2 inline-flex p-1 bg-slate-200/70 rounded-lg text-xs">
             <button
               type="button"
               onClick={() => setViewMode('tree')}
@@ -654,30 +654,24 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                     />
                     <div>
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-200/80 text-slate-700">
+                        <span className="hidden sm:inline text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-200/80 text-slate-700">
                           #{catIndex + 1}
                         </span>
                         <h3 className="text-sm font-bold text-slate-900">{cat.name}</h3>
-                        <span 
-                          className="px-1.5 py-0.2 rounded text-[10px] font-semibold border"
-                          style={{ borderColor: `${cat.color}40`, color: cat.color }}
-                        >
-                          Color Exclusivo
-                        </span>
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200/60 inline-flex items-center gap-1">
+                        <span className="hidden sm:inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200/60 items-center gap-1">
                           <Flame className="w-3 h-3 text-amber-500" />
                           <span>{usageStats[cat.id]?.transactionCount || 0} {t.categories.txCount}</span>
                         </span>
                       </div>
-                      <span className="text-xs text-slate-500">
+                      <span className="text-xs text-slate-500 hidden sm:inline">
                         {cat.subcategories.length} subcategorías asociadas · {isIncome ? 'Flujo de Ingreso' : 'Centro de Costos'}
                       </span>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-6">
-                    <div className="text-right">
-                      <span className="text-[11px] text-slate-400 block">Gasto Actual (Octubre)</span>
+                    <div className="hidden sm:block text-right">
+                      <span className="text-[11px] text-slate-400">Gasto Actual (Octubre)</span>
                       <span className={`text-sm font-bold font-mono tabular-nums ${isIncome ? 'text-emerald-700' : 'text-slate-900'}`}>
                         {formatEuro(monthTotal)}
                       </span>
@@ -783,7 +777,7 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                                 </span>
                               </div>
 
-                              <div className="text-right w-28">
+                              <div className="hidden sm:block text-right w-28">
                                 <span className="text-[10px] text-slate-400 block">Promedio Histórico</span>
                                 <span className="font-mono text-slate-600 tabular-nums">
                                   {formatEuro(sub.monthlyAverageHistorical)}
@@ -941,7 +935,7 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
                         {/* Top subcategory highlights */}
                         <div className="flex-1 space-y-1.5 text-xs">
                           {subData.slice(0, 3).map(sub => (
-                            <div key={sub.id} className="flex items-center justify-between text-xs">
+                            <div key={sub.id} className="lg:flex items-center justify-between text-xs">
                               <div className="flex items-center gap-1.5 truncate">
                                 <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: sub.color }} />
                                 <span className="text-slate-700 truncate font-medium">{sub.name}</span>

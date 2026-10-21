@@ -685,42 +685,7 @@ function MainApp() {
           </div>
         </div>
       ) : (
-        /* Real Firebase User Status Banner with react-router-dom route and active queries indicator */
-        <div className="bg-emerald-950/90 text-emerald-100 px-4 py-2.5 text-xs border-b border-emerald-800/60">
-          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Cloud className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span className="font-semibold text-white">Bóveda Cloud en Vivo:</span>
-              <span className="text-emerald-200">
-                Núcleo: <strong>{userProfile?.familyName || 'Familia'}</strong>
-              </span>
-              <span className="text-emerald-400/50">·</span>
-              <span className="text-emerald-300 inline-flex items-center gap-1 bg-emerald-900/50 px-2 py-0.5 rounded font-mono text-[11px]">
-                <Activity className="w-3 h-3 text-emerald-400" />
-                <span>react-router: /{currentPath}</span>
-                <span className="text-emerald-400/60">→</span>
-                <span>
-                  {activeSubscriptions.length > 0 
-                    ? `Consultando: [${activeSubscriptions.join(', ')}]` 
-                    : 'Sin consultas activas (0 lecturas Firestore)'}
-                </span>
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  setAccountModalDefaultType('bank_checking');
-                  setIsAccountModalOpen(true);
-                }}
-                className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-800/80 hover:bg-emerald-700 text-white font-medium rounded transition-colors cursor-pointer"
-              >
-                <Plus className="w-3 h-3" />
-                <span>Crear Cuenta</span>
-              </button>
-            </div>
-          </div>
-        </div>
+        null
       )}
 
       {/* Main Content Workspace Canvas with react-router-dom Routes */}

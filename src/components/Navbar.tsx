@@ -163,7 +163,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <button
                 type="button"
                 onClick={onOpenFamilyModal}
-                className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 text-xs text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                className="hidden sm:inline-flex flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 text-xs text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors cursor-pointer"
                 title={language === 'es' ? 'Gestión de Núcleo Familiar, Código de Acceso y Miembros' : 'Manage Family Nucleus, Invite Code and Members'}
               >
                 <Users className="w-3.5 h-3.5 text-blue-600 shrink-0" />
@@ -203,8 +203,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors shadow-xs whitespace-nowrap shrink-0 cursor-pointer"
               title={t.nav.newTransaction}
             >
-              <Plus className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="hidden md:inline">{t.nav.newTransaction}</span>
+              <Plus className="w-3.5 h-3.5" />
             </button>
           </div>
         </div>
@@ -349,16 +348,13 @@ export const Navbar: React.FC<NavbarProps> = ({
         <button
           type="button"
           onClick={onNewTransaction}
-          className="group flex items-center gap-2 sm:gap-2.5 px-4 sm:px-5 py-3 sm:py-3.5 bg-slate-900 hover:bg-slate-800 text-white rounded-full shadow-xl hover:shadow-2xl transition-all duration-200 transform hover:scale-105 active:scale-95 cursor-pointer ring-4 ring-slate-900/10 focus:outline-hidden"
+          className="flex items-center px-2 sm:px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-full shadow-xl hover:shadow-2xl transition-all duration-200 transform hover:scale-105 active:scale-95 cursor-pointer ring-3 focus:outline-hidden"
           aria-label={t.nav.newTransaction}
           title={t.nav.newTransaction}
         >
-          <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-            <Plus className="w-4 h-4 stroke-[2.5]" />
+          <div className="flex items-center justify-center">
+            <Plus className="w-6 h-6" />
           </div>
-          <span className="text-xs sm:text-sm font-bold tracking-tight pr-1 whitespace-nowrap">
-            {t.nav.newTransaction}
-          </span>
         </button>
       </aside>
 

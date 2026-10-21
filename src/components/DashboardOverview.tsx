@@ -972,9 +972,9 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           <div className="flex items-center justify-between mb-4">
             <div>
               <h2 className="text-sm font-semibold text-slate-900">Flujo Comparativo de Caja (Ingresos vs Egresos vs Inversión)</h2>
-              <p className="text-xs text-slate-500">Evolución de liquidez mensual consolidada en España</p>
+              <p className="hidden sm:inline-flex text-xs text-slate-500">Evolución de liquidez mensual consolidada en España</p>
             </div>
-            <div className="flex items-center gap-4 text-xs font-medium text-slate-600">
+            <div className="ml-3 flex flex-col sm:flex-row items-center gap-4 wrap text-xs font-medium text-slate-600">
               <span className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500 inline-block"></span> Ingresos
               </span>
