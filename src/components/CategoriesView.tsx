@@ -70,15 +70,7 @@ export const CategoriesView: React.FC<CategoriesViewProps> = ({
   onDeleteSubcategory,
   onAssignCategoryToTransaction,
 }) => {
-  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({
-    cat_vivienda: true,
-    cat_alimentacion: true,
-    cat_transporte: true,
-    cat_entretenimiento: true,
-    cat_salud: true,
-    cat_inversion: true,
-    cat_ingresos: true,
-  });
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
 
   const [viewMode, setViewMode] = useState<'tree' | 'charts'>('tree');
   const [selectedChartCategory, setSelectedChartCategory] = useState<string>('all');
