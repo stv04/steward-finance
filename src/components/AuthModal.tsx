@@ -9,16 +9,27 @@ import {
   X, 
   Sparkles, 
   CheckCircle2, 
-  AlertCircle 
+  AlertCircle,
+  Key,
+  Copy,
+  Check
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { FamilyInfo } from '../types/finance';
 
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  familyInfo?: FamilyInfo | null;
+  onOpenFamilyModal?: () => void;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({ 
+  isOpen, 
+  onClose,
+  familyInfo,
+  onOpenFamilyModal
+}) => {
   const { 
     currentUser, 
     userProfile, 
@@ -38,6 +49,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [isJoiningFamily, setIsJoiningFamily] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [localMsg, setLocalMsg] = useState<string | null>(null);
+  const [copiedCode, setCopiedCode] = useState(false);
 
   if (!isOpen) return null;
 
@@ -118,6 +130,67 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   )}
                 </div>
               </div>
+            </div>
+
+            {/* Family Code & Nucleus Card */}
+            <div className="p-4 bg-slate-900 text-white rounded-xl space-y-3 shadow-xs">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                  <Key className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Código de Acceso Familiar</span>
+                </span>
+                <span className="text-[10px] bg-slate-800 text-emerald-300 font-mono px-2 py-0.5 rounded border border-slate-700">
+                  {familyInfo?.name || userProfile.familyName || 'Núcleo'}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between bg-slate-950/80 p-3 rounded-lg border border-slate-800">
+                <div>
+                  <span className="text-[10px] text-slate-400 block">Código para invitar miembros:</span>
+                  <span className="text-base sm:text-lg font-mono font-bold text-white tracking-widest block">
+                    {familyInfo?.inviteCode || userProfile.inviteCode || userProfile.familyId}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const code = familyInfo?.inviteCode || userProfile.inviteCode || userProfile.familyId || '';
+                    try {
+                      await navigator.clipboard.writeText(code);
+                      setCopiedCode(true);
+                      setTimeout(() => setCopiedCode(false), 2000);
+                    } catch (e) {
+                      console.warn(e);
+                    }
+                  }}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-all ${
+                    copiedCode 
+                      ? 'bg-emerald-500 text-slate-950 font-bold' 
+                      : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                  }`}
+                >
+                  {copiedCode ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedCode ? '¡Copiado!' : 'Copiar'}</span>
+                </button>
+              </div>
+
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Comparte este código con los integrantes de tu hogar para vincularlos a este núcleo familiar.
+              </p>
+
+              {onOpenFamilyModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenFamilyModal();
+                  }}
+                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-lg text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Gestionar Miembros del Núcleo (Altas y Bajas)</span>
+                </button>
+              )}
             </div>
 
             <div className="flex items-center justify-between pt-2">

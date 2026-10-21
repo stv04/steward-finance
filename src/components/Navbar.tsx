@@ -1,7 +1,7 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Plus, Landmark, UploadCloud, ShieldCheck, CheckCircle2, UserCircle2, Cloud } from 'lucide-react';
-import { UserProfile, ScopeType } from '../types/finance';
+import { Plus, Landmark, UploadCloud, ShieldCheck, CheckCircle2, UserCircle2, Cloud, Users, Key } from 'lucide-react';
+import { UserProfile, ScopeType, FamilyInfo } from '../types/finance';
 import { ExtendedUserProfile } from '../context/AuthContext';
 
 interface NavbarProps {
@@ -11,9 +11,11 @@ interface NavbarProps {
   setActiveUserId: (id: string) => void;
   users: UserProfile[];
   userProfile: ExtendedUserProfile | null;
+  familyInfo?: FamilyInfo | null;
   onNewTransaction: () => void;
   onOpenReconciliation: () => void;
   onOpenAuth: () => void;
+  onOpenFamilyModal?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -23,16 +25,18 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActiveUserId,
   users,
   userProfile,
+  familyInfo,
   onNewTransaction,
   onOpenReconciliation,
   onOpenAuth,
+  onOpenFamilyModal,
 }) => {
   const location = useLocation();
   const navigate = useNavigate();
 
   // Normalize path without leading slash
   const activeTab = location.pathname.replace(/^\//, '') || 'dashboard';
-  const activeUser = users.find(u => u.id === activeUserId) || users[0];
+  const activeUser = users.find(u => u.id === activeUserId) || users[0] || { name: 'Usuario' };
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-40">
@@ -107,7 +111,25 @@ export const Navbar: React.FC<NavbarProps> = ({
         </nav>
 
         {/* Zone 3: 1 primary action + User Profile trigger */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* Family Nucleus & Code quick button when authenticated */}
+          {userProfile && (
+            <button
+              type="button"
+              onClick={onOpenFamilyModal}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-800 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+              title="Gestión de Núcleo Familiar, Código de Acceso y Miembros"
+            >
+              <Users className="w-3.5 h-3.5 text-blue-600" />
+              <span className="font-semibold hidden sm:inline max-w-[110px] truncate">
+                {familyInfo?.name || userProfile.familyName || 'Núcleo'}
+              </span>
+              <span className="bg-white text-slate-800 font-mono text-[10px] px-1.5 py-0.5 rounded border border-slate-200 font-bold">
+                {familyInfo?.inviteCode || userProfile.familyId}
+              </span>
+            </button>
+          )}
+
           {/* User profile / Login button */}
           <button
             onClick={onOpenAuth}
@@ -142,7 +164,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4 text-xs">
           
           {/* Espacio / Ámbito Switcher */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center flex-wrap gap-2">
             <span className="text-slate-500 font-medium whitespace-nowrap">Ámbito Activo:</span>
             <div className="inline-flex p-0.5 bg-slate-200/70 rounded-md">
               <button
@@ -165,7 +187,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Individual ({activeUser.name.split(' ')[0]})
+                Individual ({activeUser?.name?.split(' ')[0] || 'Personal'})
               </button>
             </div>
 
@@ -180,10 +202,34 @@ export const Navbar: React.FC<NavbarProps> = ({
                 >
                   {users.map(u => (
                     <option key={u.id} value={u.id}>
-                      {u.name}
+                      {u.name} {u.role === 'admin' ? '(Admin)' : ''}
                     </option>
                   ))}
                 </select>
+              </div>
+            )}
+
+            {/* Family Code badge & Quick Action to Open Family Nucleus Modal */}
+            {userProfile && (
+              <div className="flex items-center gap-2 ml-1 sm:ml-2 pl-2 border-l border-slate-200">
+                <span className="text-slate-500 text-[11px] font-medium hidden md:inline">Código Familiar:</span>
+                <button
+                  type="button"
+                  onClick={onOpenFamilyModal}
+                  className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-white hover:bg-slate-100 border border-slate-200 rounded text-xs font-mono font-bold text-slate-800 transition-colors shadow-2xs cursor-pointer"
+                  title="Código de invitación del núcleo. Haz clic para copiar y gestionar miembros."
+                >
+                  <Key className="w-3 h-3 text-emerald-600" />
+                  <span>{familyInfo?.inviteCode || userProfile.familyId}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenFamilyModal}
+                  className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer whitespace-nowrap"
+                >
+                  <Users className="w-3 h-3" />
+                  <span>Gestionar ({users.length} {users.length === 1 ? 'miembro' : 'miembros'})</span>
+                </button>
               </div>
             )}
           </div>

@@ -22,7 +22,8 @@ import {
   UserProfile, 
   ScopeType, 
   TransactionType,
-  AccountType 
+  AccountType,
+  FamilyInfo
 } from './types/finance';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { testFirestoreConnection } from './lib/firebase';
@@ -31,6 +32,8 @@ import {
   subscribeToFamilyTransactions, 
   subscribeToFamilyBudgetAccords, 
   subscribeToFamilyCategories,
+  subscribeToFamilyMembers,
+  subscribeToFamilyData,
   createAccountInFirestore,
   deleteAccountFromFirestore,
   saveCategoryToFirestore,
@@ -57,6 +60,7 @@ import { TransactionModal } from './components/TransactionModal';
 import { AccountModal } from './components/AccountModal';
 import { CsvReconciliationModal } from './components/CsvReconciliationModal';
 import { AuthModal } from './components/AuthModal';
+import { FamilyMembersModal } from './components/FamilyMembersModal';
 import { Cloud, Sparkles, Activity, Plus, ArrowRight } from 'lucide-react';
 
 function MainApp() {
@@ -91,8 +95,13 @@ function MainApp() {
   const [accountModalDefaultType, setAccountModalDefaultType] = useState<AccountType>('bank_checking');
   const [isReconciliationModalOpen, setIsReconciliationModalOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [isFamilyModalOpen, setIsFamilyModalOpen] = useState<boolean>(false);
   const [txModalInitialType, setTxModalInitialType] = useState<TransactionType>('expense');
   const [txModalInitialOriginAcc, setTxModalInitialOriginAcc] = useState<string | undefined>(undefined);
+
+  // Family Nucleus state
+  const [familyMembers, setFamilyMembers] = useState<UserProfile[]>([]);
+  const [familyInfo, setFamilyInfo] = useState<FamilyInfo | null>(null);
 
   // Verify connection to Firestore on boot
   useEffect(() => {
@@ -101,33 +110,54 @@ function MainApp() {
     });
   }, []);
 
-  // Update activeUserId when authenticated user changes
-  useEffect(() => {
-    if (userProfile) {
-      setActiveUserId(userProfile.id);
-    } else {
-      setActiveUserId('usr_carlos');
-    }
-  }, [userProfile]);
+  const isRealUser = Boolean(currentUser && !isDemoMode && userProfile?.familyId);
+  const familyId = userProfile?.familyId;
 
-  // Effective users list including authenticated user profile
+  // Effective users list:
+  // When logged in as a real user, it ONLY shows the members of the family nucleus from Firestore.
+  // It NEVER includes mock/test users (Carlos and Sofia) when logged in.
   const effectiveUsers = useMemo(() => {
-    if (!userProfile) return users;
-    const exists = users.some(u => u.id === userProfile.id);
-    if (!exists) {
+    if (isRealUser && userProfile) {
+      if (familyMembers.length > 0) {
+        // Ensure userProfile is in the list with current details
+        const exists = familyMembers.some(m => m.id === userProfile.id);
+        if (!exists) {
+          return [{
+            id: userProfile.id,
+            name: userProfile.name,
+            email: userProfile.email,
+            avatar: userProfile.avatar,
+            role: (userProfile.role || 'admin') as 'admin' | 'member',
+          }, ...familyMembers];
+        }
+        return familyMembers;
+      }
+      // Fallback while loading: ONLY show the logged in user, NEVER demo users!
       return [{
         id: userProfile.id,
         name: userProfile.name,
         email: userProfile.email,
         avatar: userProfile.avatar,
         role: (userProfile.role || 'admin') as 'admin' | 'member',
-      }, ...users];
+      }];
     }
-    return users.map(u => u.id === userProfile.id ? { ...u, name: userProfile.name, email: userProfile.email, avatar: userProfile.avatar } : u);
-  }, [users, userProfile]);
+    // Only in demo mode or signed out, use mock INITIAL_USERS
+    return users;
+  }, [isRealUser, userProfile, familyMembers, users]);
 
-  const isRealUser = Boolean(currentUser && !isDemoMode && userProfile?.familyId);
-  const familyId = userProfile?.familyId;
+  // Update activeUserId when authenticated user changes or effectiveUsers update
+  useEffect(() => {
+    if (userProfile) {
+      setActiveUserId(prev => {
+        if (effectiveUsers.some(u => u.id === prev)) {
+          return prev;
+        }
+        return userProfile.id;
+      });
+    } else {
+      setActiveUserId('usr_carlos');
+    }
+  }, [userProfile, effectiveUsers]);
 
   // --- REACT ROUTER ROUTE-BASED ON-DEMAND SUBSCRIPTIONS ---
   // Subscriptions are strictly mounted based on what the active react-router route requires:
@@ -239,6 +269,28 @@ function MainApp() {
       setActiveSubscriptions(prev => prev.filter(s => s !== 'categories'));
     };
   }, [needsCategories, familyId, isRealUser]);
+
+  // 5. FAMILY METADATA & MEMBERS Subscription: real-time family members & invite code
+  useEffect(() => {
+    if (!isRealUser || !familyId) {
+      setFamilyMembers([]);
+      setFamilyInfo(null);
+      return;
+    }
+
+    const unsubFamily = subscribeToFamilyData(familyId, (fInfo) => {
+      setFamilyInfo(fInfo);
+    });
+
+    const unsubMembers = subscribeToFamilyMembers(familyId, (members) => {
+      setFamilyMembers(members);
+    });
+
+    return () => {
+      unsubFamily();
+      unsubMembers();
+    };
+  }, [isRealUser, familyId]);
 
   // Initialize Starter Baseline in Firestore for newly registered families (Inherits ONLY Budget & Categories)
   const handleSeedCloudVault = async () => {
@@ -599,6 +651,7 @@ function MainApp() {
         setActiveUserId={setActiveUserId}
         users={effectiveUsers}
         userProfile={userProfile}
+        familyInfo={familyInfo}
         onNewTransaction={() => {
           setTxModalInitialType('expense');
           setTxModalInitialOriginAcc(undefined);
@@ -606,6 +659,7 @@ function MainApp() {
         }}
         onOpenReconciliation={() => setIsReconciliationModalOpen(true)}
         onOpenAuth={() => setIsAuthModalOpen(true)}
+        onOpenFamilyModal={() => setIsFamilyModalOpen(true)}
       />
 
       {/* Presentation Mode / Cloud Status Banner */}
@@ -716,7 +770,7 @@ function MainApp() {
                 transactions={transactions}
                 accounts={accounts}
                 categories={categories}
-                users={users}
+                users={effectiveUsers}
                 activeScope={activeScope}
                 activeUserId={activeUserId}
                 onNewTransaction={() => {
@@ -742,7 +796,7 @@ function MainApp() {
                 accords={accords}
                 transactions={transactions}
                 categories={categories}
-                users={users}
+                users={effectiveUsers}
                 activeScope={activeScope}
                 activeUserId={activeUserId}
                 onSaveNewAccord={handleSaveNewAccord}
@@ -818,7 +872,7 @@ function MainApp() {
         onSave={handleSaveTransaction}
         accounts={accounts}
         categories={categories}
-        users={users}
+        users={effectiveUsers}
         existingTransactions={transactions}
         editingTransaction={editingTransaction}
         initialType={txModalInitialType}
@@ -842,6 +896,17 @@ function MainApp() {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
+        familyInfo={familyInfo}
+        onOpenFamilyModal={() => setIsFamilyModalOpen(true)}
+      />
+
+      {/* Family Nucleus & Code Management Modal */}
+      <FamilyMembersModal
+        isOpen={isFamilyModalOpen}
+        onClose={() => setIsFamilyModalOpen(false)}
+        familyInfo={familyInfo}
+        familyMembers={effectiveUsers}
+        currentUserProfile={userProfile}
       />
 
       {/* Quiet, minimalist footer */}

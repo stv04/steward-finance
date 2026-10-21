@@ -17,6 +17,16 @@ export interface UserProfile {
   email: string;
   avatar: string;
   role: 'admin' | 'member';
+  joinedAt?: string;
+  status?: 'active' | 'invited';
+}
+
+export interface FamilyInfo {
+  id: string;
+  name: string;
+  inviteCode: string;
+  createdBy?: string;
+  createdAt?: string;
 }
 
 export interface FinancialAccount {

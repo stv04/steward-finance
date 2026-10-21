@@ -176,15 +176,19 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   const familyMembers = useMemo(() => {
     const list = users && users.length > 0 ? [...users] : [];
     const knownIds = new Set(list.map(u => u.id));
+    const isMockMode = list.some(u => u.id === 'usr_carlos' || u.id === 'usr_sofia');
+
     for (const tx of transactions) {
       if (tx.userId && !knownIds.has(tx.userId)) {
+        // If in real authenticated family mode, never include mock demo users!
+        if (!isMockMode && (tx.userId === 'usr_carlos' || tx.userId === 'usr_sofia')) {
+          continue;
+        }
         list.push({
           id: tx.userId,
-          name: tx.userId === 'usr_carlos' ? 'Carlos Mendoza' : tx.userId === 'usr_sofia' ? 'Sofía Rodríguez' : `Miembro (${tx.userId.replace(/^usr_/, '')})`,
+          name: tx.userId === 'usr_carlos' ? 'Carlos Mendoza' : tx.userId === 'usr_sofia' ? 'Sofía Rodríguez' : `Miembro (${tx.userId.replace(/^usr_/, '').substring(0, 6)})`,
           email: `${tx.userId}@familia.internal`,
-          avatar: tx.userId === 'usr_sofia' 
-            ? 'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=150&auto=format&fit=crop&q=80'
-            : 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+          avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(tx.userId)}`,
           role: 'member'
         });
         knownIds.add(tx.userId);

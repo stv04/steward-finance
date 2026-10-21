@@ -49,15 +49,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const snap = await getDoc(userDocRef);
           if (snap.exists()) {
             const data = snap.data();
+            const famId = data.familyId || 'fam_default_2026';
+            const profileName = data.fullName || user.displayName || user.email?.split('@')[0] || 'Usuario';
+            const avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(data.fullName || user.email || 'U')}`;
+            const role = data.role || 'member';
+
             setUserProfile({
               id: user.uid,
-              name: data.fullName || user.displayName || user.email?.split('@')[0] || 'Usuario',
+              name: profileName,
               email: user.email || '',
-              avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(data.fullName || user.email || 'U')}`,
-              role: data.role || 'member',
-              familyId: data.familyId || 'fam_default_2026',
+              avatar,
+              role,
+              familyId: famId,
               familyName: data.familyName || 'Familia Principal',
             });
+            // Ensure member record exists in families/{famId}/members
+            try {
+              await setDoc(doc(db, 'families', famId, 'members', user.uid), {
+                id: user.uid,
+                name: profileName,
+                email: user.email || '',
+                avatar,
+                role,
+                joinedAt: data.createdAt || new Date().toISOString(),
+              }, { merge: true });
+            } catch (mErr) {
+              console.warn('Could not sync member doc:', mErr);
+            }
           } else {
             // Create user profile document if not existing
             const newProfile: ExtendedUserProfile = {
@@ -77,6 +95,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               familyId: newProfile.familyId,
               createdAt: new Date().toISOString(),
             });
+            const initialFamId = newProfile.familyId || 'fam_default_2026';
+            await setDoc(doc(db, 'families', initialFamId, 'members', user.uid), {
+              id: user.uid,
+              name: newProfile.name,
+              email: user.email || '',
+              avatar: newProfile.avatar,
+              role: newProfile.role,
+              joinedAt: new Date().toISOString(),
+            }, { merge: true });
             setUserProfile(newProfile);
           }
         } catch (err: any) {
@@ -101,6 +128,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     return () => unsubscribe();
   }, [isDemoMode]);
+
+  const refreshProfile = async () => {
+    if (currentUser) {
+      try {
+        const userDocRef = doc(db, 'users', currentUser.uid);
+        const snap = await getDoc(userDocRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          setUserProfile({
+            id: currentUser.uid,
+            name: data.fullName || currentUser.displayName || currentUser.email?.split('@')[0] || 'Usuario',
+            email: currentUser.email || '',
+            avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(data.fullName || currentUser.email || 'U')}`,
+            role: data.role || 'member',
+            familyId: data.familyId || 'fam_default_2026',
+            familyName: data.familyName || 'Familia Principal',
+          });
+        }
+      } catch (err) {
+        console.warn('Error refreshing user profile:', err);
+      }
+    }
+  };
 
   const loginWithEmail = async (email: string, pass: string) => {
     setError(null);
@@ -128,11 +178,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const cred = await createUserWithEmailAndPassword(auth, email, pass);
       const user = cred.user;
       
-      const familyId = isJoining 
-        ? (familyNameOrCode.trim() || 'fam_default_2026') 
-        : `fam_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      let familyId = `fam_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      let familyName = familyNameOrCode.trim() || 'Familia ' + fullName.split(' ')[0];
 
-      const familyName = isJoining ? 'Familia Compartida' : familyNameOrCode.trim() || 'Familia ' + fullName.split(' ')[0];
+      if (isJoining && familyNameOrCode.trim()) {
+        try {
+          const { joinFamilyByCode } = await import('../services/firestoreService');
+          const joinResult = await joinFamilyByCode(user.uid, fullName.trim(), user.email || '', familyNameOrCode.trim());
+          if (joinResult.success) {
+            familyId = joinResult.familyId;
+            familyName = joinResult.familyName;
+          } else {
+            familyId = familyNameOrCode.trim();
+          }
+        } catch (jErr) {
+          familyId = familyNameOrCode.trim();
+        }
+      }
 
       // Store in users collection
       const userPath = `users/${user.uid}`;
@@ -146,11 +208,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           familyName,
           createdAt: new Date().toISOString(),
         });
+
+        // Also store in families/{familyId}/members
+        await setDoc(doc(db, 'families', familyId, 'members', user.uid), {
+          id: user.uid,
+          name: fullName.trim(),
+          email: user.email || '',
+          avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(fullName)}`,
+          role: isJoining ? 'member' : 'admin',
+          joinedAt: new Date().toISOString(),
+        }, { merge: true });
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, userPath);
       }
 
-      // If creating a new family, inherit ONLY starter budget accord and base categories (accounts are created manually)
+      // If creating a new family, inherit ONLY starter budget accord and base categories
       if (!isJoining) {
         try {
           await initializeFamilyWithStarterData(familyId, user.uid, familyName);

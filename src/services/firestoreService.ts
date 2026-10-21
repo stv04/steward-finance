@@ -4,18 +4,18 @@ import {
   setDoc, 
   deleteDoc, 
   onSnapshot, 
-  writeBatch,
-  query,
-  orderBy,
-  where,
-  QueryConstraint,
-  getDoc
+  writeBatch, 
+  query, 
+  orderBy, 
+  where, 
+  QueryConstraint, 
+  getDoc,
+  getDocs
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { FinancialAccount, Transaction, BudgetAccord, ParentCategory } from '../types/finance';
+import { FinancialAccount, Transaction, BudgetAccord, ParentCategory, UserProfile, FamilyInfo } from '../types/finance';
 import { INITIAL_BUDGET_ACCORDS, INITIAL_CATEGORIES } from '../data/mockData';
 import { normalizeAndValidateDate } from '../utils/dateUtils';
-import firebase from 'firebase/compat/app';
 
 /**
  * Sanitizes an object by removing undefined fields to satisfy Firestore payload constraints
@@ -527,12 +527,22 @@ export async function initializeFamilyWithStarterData(
 
   // 1. Create or ensure family document
   const famRef = doc(db, 'families', familyId);
+  const inviteCode = `FAM-${Math.floor(1000 + Math.random() * 9000)}`;
   batch.set(famRef, {
     id: familyId,
     name: familyName,
     createdBy: currentUserId,
-    inviteCode: `FAM-${Math.floor(1000 + Math.random() * 9000)}`,
+    inviteCode,
     createdAt: new Date().toISOString(),
+  }, { merge: true });
+
+  // 1.1 Add creator as admin member in family members subcollection
+  const memberRef = doc(db, 'families', familyId, 'members', currentUserId);
+  batch.set(memberRef, {
+    id: currentUserId,
+    name: familyName.replace(/^Familia\s*/i, '') || 'Administrador',
+    role: 'admin',
+    joinedAt: new Date().toISOString(),
   }, { merge: true });
 
   // 2. Inherit starter Budget Accord with continuous zero-based budgeting rules
@@ -569,3 +579,292 @@ export async function initializeFamilyWithStarterData(
 
 // Backwards compatibility alias
 export const initializeFamilyWithSeedData = initializeFamilyWithStarterData;
+
+/**
+ * Real-time listener for Family Document metadata (name, inviteCode, etc.)
+ */
+export function subscribeToFamilyData(
+  familyId: string,
+  onUpdate: (family: FamilyInfo | null) => void
+): () => void {
+  const famPath = `families/${familyId}`;
+  const famRef = doc(db, 'families', familyId);
+
+  return onSnapshot(
+    famRef,
+    (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        onUpdate({
+          id: snap.id,
+          name: data.name || 'Familia Principal',
+          inviteCode: data.inviteCode || snap.id,
+          createdBy: data.createdBy || '',
+          createdAt: data.createdAt,
+        });
+      } else {
+        onUpdate(null);
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, famPath);
+    }
+  );
+}
+
+/**
+ * Real-time listener for Family Members
+ * Queries both families/{familyId}/members subcollection and users collection matching familyId
+ */
+export function subscribeToFamilyMembers(
+  familyId: string,
+  onUpdate: (members: UserProfile[]) => void
+): () => void {
+  const membersPath = `families/${familyId}/members`;
+  const colRef = collection(db, 'families', familyId, 'members');
+
+  return onSnapshot(
+    colRef,
+    async (snapshot) => {
+      const subMembers: UserProfile[] = snapshot.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          name: data.name || data.fullName || 'Miembro',
+          email: data.email || '',
+          avatar: data.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(data.name || d.id)}`,
+          role: (data.role || 'member') as 'admin' | 'member',
+          joinedAt: data.joinedAt,
+          status: data.status,
+        };
+      });
+
+      // Also merge with any users in users collection with familyId
+      try {
+        const usersQ = query(collection(db, 'users'), where('familyId', '==', familyId));
+        const usersSnap = await getDocs(usersQ);
+        const map = new Map<string, UserProfile>();
+        for (const m of subMembers) map.set(m.id, m);
+
+        for (const uDoc of usersSnap.docs) {
+          const uData = uDoc.data();
+          if (!map.has(uDoc.id)) {
+            map.set(uDoc.id, {
+              id: uDoc.id,
+              name: uData.fullName || uData.name || 'Miembro',
+              email: uData.email || '',
+              avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(uData.fullName || uData.email || uDoc.id)}`,
+              role: (uData.role || 'member') as 'admin' | 'member',
+              joinedAt: uData.createdAt,
+            });
+          }
+        }
+        onUpdate(Array.from(map.values()));
+      } catch (err) {
+        onUpdate(subMembers);
+      }
+    },
+    (error) => {
+      handleFirestoreError(error, OperationType.GET, membersPath);
+    }
+  );
+}
+
+/**
+ * Adds or invites a member to the family nucleus. Only admins should call this.
+ */
+export async function addMemberToFamily(
+  familyId: string,
+  familyName: string,
+  memberEmail: string,
+  memberName?: string,
+  role: 'admin' | 'member' = 'member'
+): Promise<{ success: boolean; message: string }> {
+  const cleanEmail = memberEmail.trim().toLowerCase();
+  if (!cleanEmail) {
+    return { success: false, message: 'El correo electrónico es obligatorio.' };
+  }
+
+  try {
+    // 1. Check if user already exists with this email in users collection
+    const usersQ = query(collection(db, 'users'), where('email', '==', cleanEmail));
+    const userSnap = await getDocs(usersQ);
+
+    if (!userSnap.empty) {
+      const targetUserDoc = userSnap.docs[0];
+      const targetUserId = targetUserDoc.id;
+      const targetData = targetUserDoc.data();
+
+      // Update their user document to attach to this family
+      await setDoc(doc(db, 'users', targetUserId), {
+        familyId,
+        familyName,
+        role,
+      }, { merge: true });
+
+      // Add to members subcollection
+      await setDoc(doc(db, 'families', familyId, 'members', targetUserId), {
+        id: targetUserId,
+        name: targetData.fullName || memberName || cleanEmail.split('@')[0],
+        email: cleanEmail,
+        avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(targetData.fullName || cleanEmail)}`,
+        role,
+        joinedAt: new Date().toISOString(),
+      }, { merge: true });
+
+      return {
+        success: true,
+        message: `El usuario ${targetData.fullName || cleanEmail} ha sido vinculado al núcleo familiar exitosamente.`,
+      };
+    } else {
+      // User is not yet registered: register an invited member placeholder
+      const inviteId = `invite_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+      await setDoc(doc(db, 'families', familyId, 'members', inviteId), {
+        id: inviteId,
+        name: memberName?.trim() || cleanEmail.split('@')[0],
+        email: cleanEmail,
+        avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(memberName || cleanEmail)}`,
+        role,
+        status: 'invited',
+        joinedAt: new Date().toISOString(),
+      }, { merge: true });
+
+      return {
+        success: true,
+        message: `Invitación registrada para ${cleanEmail}. Al registrarse o ingresar el código familiar se conectará de inmediato.`,
+      };
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, `families/${familyId}/members`);
+    return { success: false, message: 'Ocurrió un error al agregar el miembro al núcleo.' };
+  }
+}
+
+/**
+ * Removes a member from the family nucleus. Only admins can execute this.
+ */
+export async function removeMemberFromFamily(
+  familyId: string,
+  memberUserId: string
+): Promise<{ success: boolean; message: string }> {
+  try {
+    // 1. Remove from members subcollection
+    const memberDocRef = doc(db, 'families', familyId, 'members', memberUserId);
+    await deleteDoc(memberDocRef);
+
+    // 2. If it's a real user document (not just an invite placeholder), detach their familyId in users collection
+    if (!memberUserId.startsWith('invite_')) {
+      const userRef = doc(db, 'users', memberUserId);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        await setDoc(userRef, {
+          familyId: `fam_detached_${memberUserId}`,
+          familyName: 'Familia Individual',
+          role: 'admin',
+        }, { merge: true });
+      }
+    }
+
+    return {
+      success: true,
+      message: 'Miembro retirado del núcleo familiar correctamente.',
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, `families/${familyId}/members/${memberUserId}`);
+    return { success: false, message: 'No se pudo retirar el miembro del núcleo.' };
+  }
+}
+
+/**
+ * Allows a user to join an existing family by entering the Family Code or ID
+ */
+export async function joinFamilyByCode(
+  userId: string,
+  userFullName: string,
+  userEmail: string,
+  codeOrId: string
+): Promise<{ success: boolean; familyId: string; familyName: string; message: string }> {
+  const trimmed = codeOrId.trim();
+  if (!trimmed) {
+    return { success: false, familyId: '', familyName: '', message: 'Introduce un código válido.' };
+  }
+
+  try {
+    // 1. Search by inviteCode
+    const q1 = query(collection(db, 'families'), where('inviteCode', '==', trimmed));
+    const snap = await getDocs(q1);
+
+    // 2. Fallback search by ID
+    if (snap.empty) {
+      const docRef = doc(db, 'families', trimmed);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const famData = docSnap.data();
+        const familyId = docSnap.id;
+        const familyName = famData.name || 'Familia Compartida';
+
+        // Update user profile doc
+        await setDoc(doc(db, 'users', userId), {
+          familyId,
+          familyName,
+          role: 'member',
+        }, { merge: true });
+
+        // Add to family members
+        await setDoc(doc(db, 'families', familyId, 'members', userId), {
+          id: userId,
+          name: userFullName,
+          email: userEmail,
+          avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(userFullName || userEmail)}`,
+          role: 'member',
+          joinedAt: new Date().toISOString(),
+        }, { merge: true });
+
+        return {
+          success: true,
+          familyId,
+          familyName,
+          message: `¡Te has vinculado exitosamente al núcleo "${familyName}"!`,
+        };
+      }
+    } else {
+      const famDoc = snap.docs[0];
+      const familyId = famDoc.id;
+      const familyName = famDoc.data().name || 'Familia Compartida';
+
+      // Update user profile doc
+      await setDoc(doc(db, 'users', userId), {
+        familyId,
+        familyName,
+        role: 'member',
+      }, { merge: true });
+
+      // Add to family members
+      await setDoc(doc(db, 'families', familyId, 'members', userId), {
+        id: userId,
+        name: userFullName,
+        email: userEmail,
+        avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(userFullName || userEmail)}`,
+        role: 'member',
+        joinedAt: new Date().toISOString(),
+      }, { merge: true });
+
+      return {
+        success: true,
+        familyId,
+        familyName,
+        message: `¡Te has vinculado exitosamente al núcleo "${familyName}"!`,
+      };
+    }
+
+    return {
+      success: false,
+      familyId: '',
+      familyName: '',
+      message: 'No se encontró ningún núcleo familiar con ese código de invitación.',
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, 'families');
+    return { success: false, familyId: '', familyName: '', message: 'Error al buscar el código familiar.' };
+  }
+}
