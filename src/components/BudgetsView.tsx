@@ -3,6 +3,7 @@ import {
   ChevronLeft, 
   ChevronRight, 
   Sparkles, 
+  Edit2,
   Calendar, 
   AlertTriangle, 
   CheckCircle2, 
@@ -25,6 +26,7 @@ interface BudgetsViewProps {
   activeScope: ScopeType;
   activeUserId: string;
   onSaveNewAccord: (newAccord: BudgetAccord) => void;
+  onUpdateAccord?: (updatedAccord: BudgetAccord) => void;
 }
 
 export const BudgetsView: React.FC<BudgetsViewProps> = ({
@@ -35,10 +37,22 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
   activeScope,
   activeUserId,
   onSaveNewAccord,
+  onUpdateAccord,
 }) => {
-  // Current month context: October 2026
-  const [selectedMonth, setSelectedMonth] = useState<string>('2026-10');
+  // Current month context: Defaults to current real month (YYYY-MM)
+  const currentActualMonth = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }, []);
+
+  const [selectedMonth, setSelectedMonth] = useState<string>(() => {
+    // If October 2026 or current real month is preferred, let's keep current real month or fallback
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
   const [isAccordModalOpen, setIsAccordModalOpen] = useState<boolean>(false);
+  const [isEditMode, setIsEditMode] = useState<boolean>(false);
+  const [editingAccordId, setEditingAccordId] = useState<string | null>(null);
 
   // Month navigation helpers
   const handlePrevMonth = () => {
@@ -75,12 +89,20 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
     return date.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
   };
 
-  // State for creating a new accord
+  // Check if selected month is the current calendar month
+  const isSelectedMonthCurrent = selectedMonth === currentActualMonth;
+
+  // Can edit if selected month is current month AND there is an active accord
+  const canEditCurrentMonthBudget = isSelectedMonthCurrent && !!summary.activeAccord;
+
+  // State for creating or editing an accord
   const [newAccordName, setNewAccordName] = useState<string>('');
   const [newAccordMonth, setNewAccordMonth] = useState<string>(selectedMonth);
   const [newAccordEnvelopes, setNewAccordEnvelopes] = useState<Record<string, number>>({});
 
   const openCreateAccordModal = () => {
+    setIsEditMode(false);
+    setEditingAccordId(null);
     setNewAccordName(`Pacto Presupuestario ${formatMonthTitle(selectedMonth)}`);
     setNewAccordMonth(selectedMonth);
     
@@ -94,25 +116,66 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
     setIsAccordModalOpen(true);
   };
 
+  const openEditCurrentAccordModal = () => {
+    if (!summary.activeAccord || !canEditCurrentMonthBudget) return;
+
+    setIsEditMode(true);
+    // If the active accord's effectiveMonth is already the current month, we edit that accord.
+    // If it was inherited from a previous month, editing the budget for the current month promulgates/creates
+    // the accord explicitly for the current month so past historical months remain intact.
+    const isDirectCurrentMonth = summary.activeAccord.effectiveMonth === currentActualMonth;
+    setEditingAccordId(isDirectCurrentMonth ? summary.activeAccord.id : null);
+    setNewAccordName(summary.activeAccord.name);
+    setNewAccordMonth(currentActualMonth);
+
+    const initialMap: Record<string, number> = {};
+    for (const cat of categories.filter(c => c.type === 'expense')) {
+      const existing = summary.envelopeStatuses.find(e => e.categoryId === cat.id);
+      initialMap[cat.id] = existing ? existing.budgetedAmount : 0;
+    }
+    setNewAccordEnvelopes(initialMap);
+    setIsAccordModalOpen(true);
+  };
+
   const handleSaveAccordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (isEditMode && !canEditCurrentMonthBudget) {
+      alert('Solo se permite editar el presupuesto del mes actual.');
+      return;
+    }
+
     const envelopes: BudgetEnvelope[] = Object.entries(newAccordEnvelopes).map(([catId, amount]) => ({
       id: `env_${Date.now()}_${catId}`,
       categoryId: catId,
       budgetedAmount: Number(amount) || 0,
     }));
 
-    const accord: BudgetAccord = {
-      id: `accord_${Date.now()}`,
-      name: newAccordName || `Pacto Presupuestario ${newAccordMonth}`,
-      effectiveMonth: newAccordMonth,
-      scope: activeScope,
-      createdByUserId: activeUserId,
-      createdAt: new Date().toISOString(),
-      envelopes,
-    };
+    if (isEditMode && editingAccordId && onUpdateAccord) {
+      const updatedAccord: BudgetAccord = {
+        ...(summary.activeAccord || {}),
+        id: editingAccordId,
+        name: newAccordName || `Pacto Presupuestario ${newAccordMonth}`,
+        effectiveMonth: newAccordMonth,
+        scope: activeScope,
+        createdByUserId: activeUserId,
+        createdAt: summary.activeAccord?.createdAt || new Date().toISOString(),
+        envelopes,
+      };
+      onUpdateAccord(updatedAccord);
+    } else {
+      const accord: BudgetAccord = {
+        id: `accord_${Date.now()}`,
+        name: newAccordName || `Pacto Presupuestario ${newAccordMonth}`,
+        effectiveMonth: newAccordMonth,
+        scope: activeScope,
+        createdByUserId: activeUserId,
+        createdAt: new Date().toISOString(),
+        envelopes,
+      };
+      onSaveNewAccord(accord);
+    }
 
-    onSaveNewAccord(accord);
     setIsAccordModalOpen(false);
   };
 
@@ -193,6 +256,16 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
         </div>
 
         <div className="shrink-0 flex items-center gap-2">
+          {canEditCurrentMonthBudget && (
+            <button
+              onClick={openEditCurrentAccordModal}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-800 bg-white hover:bg-slate-50 border border-slate-300 rounded-lg shadow-2xs transition-colors cursor-pointer"
+              title="Modificar asignación de sobres del mes actual"
+            >
+              <Edit2 className="w-3.5 h-3.5 text-blue-600" />
+              <span>Editar Presupuesto del Mes</span>
+            </button>
+          )}
           <span className="text-[11px] text-slate-500">
             Regla de Herencia: <strong>Recursiva activa</strong>
           </span>
@@ -346,14 +419,20 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
         </div>
       </div>
 
-      {/* Modal: Promulgar Nuevo Pacto Presupuestario */}
+      {/* Modal: Promulgar o Editar Pacto Presupuestario */}
       {isAccordModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-xl max-w-lg w-full p-6 shadow-xl border border-slate-200 my-8">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div>
-                <h3 className="text-base font-bold text-slate-900">Promulgar Nuevo Pacto Presupuestario</h3>
-                <p className="text-xs text-slate-500">Establece un nuevo marco presupuestario para este y los meses futuros</p>
+                <h3 className="text-base font-bold text-slate-900">
+                  {isEditMode ? 'Editar Presupuesto del Mes Actual' : 'Promulgar Nuevo Pacto Presupuestario'}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {isEditMode 
+                    ? `Ajustando los sobres presupuestarios para ${formatMonthTitle(newAccordMonth)}`
+                    : 'Establece un nuevo marco presupuestario para este y los meses futuros'}
+                </p>
               </div>
               <button
                 onClick={() => setIsAccordModalOpen(false)}
@@ -380,10 +459,20 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
                 <input
                   type="month"
                   required
+                  disabled={isEditMode}
                   value={newAccordMonth}
                   onChange={(e) => setNewAccordMonth(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs font-mono border border-slate-300 rounded-lg focus:outline-hidden focus:border-slate-500"
+                  className={`w-full px-3 py-1.5 text-xs font-mono border rounded-lg focus:outline-hidden ${
+                    isEditMode 
+                      ? 'bg-slate-100 text-slate-500 border-slate-200 cursor-not-allowed' 
+                      : 'border-slate-300 focus:border-slate-500'
+                  }`}
                 />
+                {isEditMode && (
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Solo se permite editar el presupuesto del mes en curso ({formatMonthTitle(currentActualMonth)}).
+                  </p>
+                )}
               </div>
 
               <div>
@@ -400,11 +489,11 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
                       <div className="flex items-center gap-1 shrink-0">
                         <input
                           type="number"
-                          step="10"
+                          step="1"
                           min="0"
                           value={newAccordEnvelopes[cat.id] ?? 0}
                           onChange={(e) => {
-                            const val = parseFloat(e.target.value) || 0;
+                            const val = parseFloat(e.target.value);
                             setNewAccordEnvelopes(prev => ({ ...prev, [cat.id]: val }));
                           }}
                           className="w-24 px-2 py-1 text-xs font-mono tabular-nums border border-slate-300 rounded text-right bg-white"
@@ -428,7 +517,7 @@ export const BudgetsView: React.FC<BudgetsViewProps> = ({
                   type="submit"
                   className="px-5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors shadow-xs cursor-pointer"
                 >
-                  Confirmar y Promulgar Pacto
+                  {isEditMode ? 'Guardar Cambios del Presupuesto' : 'Confirmar y Promulgar Pacto'}
                 </button>
               </div>
             </form>

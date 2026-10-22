@@ -629,6 +629,19 @@ function MainApp() {
     setAccords(prev => [...prev, newAccord]);
   };
 
+  const handleUpdateAccord = async (updatedAccord: BudgetAccord) => {
+    if (currentUser && !isDemoMode && userProfile?.familyId) {
+      try {
+        await saveBudgetAccordToFirestore(userProfile.familyId, updatedAccord);
+      } catch (err) {
+        console.error('Firestore accord update failed:', err);
+      }
+      return;
+    }
+
+    setAccords(prev => prev.map(a => a.id === updatedAccord.id ? updatedAccord : a));
+  };
+
   const handleDeleteTransaction = async (id: string) => {
     if (currentUser && !isDemoMode && userProfile?.familyId) {
       try {
@@ -767,6 +780,7 @@ function MainApp() {
                 activeScope={activeScope}
                 activeUserId={activeUserId}
                 onSaveNewAccord={handleSaveNewAccord}
+                onUpdateAccord={handleUpdateAccord}
               />
             } 
           />
